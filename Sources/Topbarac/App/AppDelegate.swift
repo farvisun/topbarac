@@ -60,6 +60,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var welcomeWindow: WindowHost?
+    private var storageWindow: WindowHost?
+
+    func openStorage() {
+        statusItems?.closePopover()
+        if storageWindow == nil {
+            storageWindow = WindowHost(title: "Storage", autosave: "topbarac.storage", size: NSSize(width: 680, height: 520)) {
+                AnyView(StorageWindow().environment(MonitorStore.shared).environment(SettingsStore.shared))
+            }
+        }
+        storageWindow?.show()
+    }
 
     func openWelcome() {
         welcomeWindow = WindowHost(title: "Welcome to Topbarac", autosave: "topbarac.welcome", size: NSSize(width: 520, height: 560)) {
