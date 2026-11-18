@@ -40,7 +40,19 @@ struct ChartSpec {
     var includesZero = true
     /// Areas stack on top of each other (parts of one whole, like user + system CPU).
     var stacked = false
+    /// Warning and critical lines, in chart units. Lines outside the visible scale are skipped.
+    var thresholds: [(value: Double, level: Level)] = []
+    /// Alert events of this widget are marked on the time axis.
+    var kind: WidgetKind?
     var format: (Double) -> String
+}
+
+extension ChartSpec {
+    /// Threshold lines from a widget's settings; `scale` converts the setting (percent, °C) to chart units.
+    static func thresholds(_ config: WidgetConfig, scale: Double = 1) -> [(value: Double, level: Level)] {
+        guard config.thresholdsEnabled else { return [] }
+        return [(config.warning * scale, .warning), (config.critical * scale, .critical)]
+    }
 }
 
 nonisolated private struct ChartPoint: Identifiable, Sendable {
@@ -89,6 +101,9 @@ struct LiveChart: View {
                             .font(.system(size: 10.5)).foregroundStyle(.tertiary)
                     }
                 }
+            if let summary = summary(points) {
+                Text(summary).font(.system(size: 9.5)).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+            }
         }
         .task(id: range) { await loadPersisted() }
         .onChange(of: settings.settings.historyEnabled) { if !ranges.contains(range) { range = .m1 } }
@@ -190,6 +205,20 @@ struct LiveChart: View {
                     .lineStyle(StrokeStyle(lineWidth: isArea(p.series) ? 1.3 : 1.6, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
             }
+            ForEach(Array(visibleThresholds(points).enumerated()), id: \.offset) { _, t in
+                RuleMark(y: .value("Threshold", t.value))
+                    .foregroundStyle(t.level.color.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 3]))
+            }
+            ForEach(events(points), id: \.time) { e in
+                RuleMark(x: .value("Alert", e.time))
+                    .foregroundStyle(Color.red.opacity(0.45))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(position: .top, alignment: .center, spacing: -2) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 7)).foregroundStyle(.red)
+                            .help("\(e.rule.metric.title) alert at \(e.time.formatted(date: .omitted, time: .shortened))")
+                    }
+            }
             ForEach(ends) { p in
                 PointMark(x: .value("Time", p.time), y: .value("Value", p.top))
                     .foregroundStyle(color(p.series))
@@ -252,6 +281,37 @@ struct LiveChart: View {
         .onKeyPress(.escape) { selection = nil; frozen = nil; return .handled }
         .accessibilityLabel(spec.series.map(\.label).joined(separator: " and ") + " chart")
         .accessibilityValue(accessibilitySummary(points))
+    }
+
+    /// The whole-chart readout under the plot: low, average and peak of the main series over the shown range
+    /// (the stacked total for stacked charts), plus the peak of a mirrored series.
+    private func summary(_ points: [ChartPoint]) -> String? {
+        guard selection == nil, let main = spec.series.first else { return nil }
+        var values: [Double]
+        if spec.stacked, let last = spec.series.last {
+            values = points.filter { $0.series == last.key }.map(\.top)
+        } else {
+            values = points.filter { $0.series == main.key }.map(\.raw)
+        }
+        guard values.count > 2, let lo = values.min(), let hi = values.max() else { return nil }
+        let avg = values.reduce(0, +) / Double(values.count)
+        let label = spec.stacked ? "Total" : (spec.series.count > 1 ? main.label : "")
+        var text = "\(label.isEmpty ? "" : label + "  ")low \(spec.format(lo))  ·  avg \(spec.format(avg))  ·  peak \(spec.format(hi))"
+        if let mirrored = spec.series.first(where: \.mirrored),
+           let peak = points.filter({ $0.series == mirrored.key }).map(\.raw).max() {
+            text += "  ·  \(mirrored.label) peak \(spec.format(peak))"
+        }
+        return text
+    }
+
+    private func visibleThresholds(_ points: [ChartPoint]) -> [(value: Double, level: Level)] {
+        guard let domain = spec.domain ?? fittedDomain(points) else { return [] }
+        return spec.thresholds.filter { domain.contains($0.value) }
+    }
+
+    private func events(_ points: [ChartPoint]) -> [AlertEvent] {
+        guard let kind = spec.kind, let first = points.map(\.time).min() else { return [] }
+        return store.recentAlerts.filter { $0.rule.metric.widget == kind && $0.time >= first }
     }
 
     /// Domain for charts without a fixed one. Temperatures hug the data (padded, snapped to 5s) so lines don't sit

@@ -19,11 +19,17 @@ final class MonitorStore {
     private(set) var processes: [ProcessSample] = []
     /// Ring buffers are mutated in place (no copy per tick); views observe `historyTick` instead.
     @ObservationIgnored private var histories: [SeriesKey: SeriesHistory] = [:]
+    /// Per-core usage for the core heatmap: the last two minutes or so, oldest first. Reads go through `historyTick`.
+    /// Per-app CPU over the last minute, kept only while the processes window is open.
+    @ObservationIgnored private var cpuTrails: [Int32: [Double]] = [:]
+    @ObservationIgnored private var coreSamples: [(time: Date, usage: [Double])] = []
     private(set) var historyTick = 0
     private(set) var lastFrame: Date?
     private(set) var paused = false
     /// Alert rules whose condition currently holds (drives the flashing menu bar item).
     private(set) var activeAlertWidgets: Set<WidgetKind> = []
+    /// Alerts fired this session (newest last), marked on the charts.
+    private(set) var recentAlerts: [AlertEvent] = []
     /// Popovers that are open right now.
     private(set) var openDetails: Set<WidgetKind> = []
 
@@ -54,9 +60,29 @@ final class MonitorStore {
 
     /// The All Processes window samples processes (and per-app network) while it is open.
     @ObservationIgnored private var processWindowOpen = false
-    func setProcessWindow(open: Bool) { processWindowOpen = open; if !open && openDetails.isEmpty { processes = [] }; updatePlan() }
+    func setProcessWindow(open: Bool) {
+        processWindowOpen = open
+        if !open { cpuTrails = [:]; if openDetails.isEmpty && !overviewOpen { processes = [] } }
+        updatePlan()
+    }
+
+    /// Reading this registers the caller for history updates.
+    func cpuTrail(_ pid: Int32) -> [Double] {
+        _ = historyTick
+        return cpuTrails[pid] ?? []
+    }
 
     func openDetail(_ kind: WidgetKind) { openDetails.insert(kind); updatePlan() }
+
+    /// The overview shows every widget, so all of them are sampled while it is open, plus the process list
+    /// (the health check names the app to blame).
+    private(set) var overviewOpen = false
+    func setOverview(open: Bool) {
+        guard open != overviewOpen else { return }
+        overviewOpen = open
+        if !open && openDetails.isEmpty && !processWindowOpen { processes = [] }
+        updatePlan()
+    }
     func closeDetail(_ kind: WidgetKind) {
         openDetails.remove(kind)
         if openDetails.isEmpty && !processWindowOpen { processes = [] }
@@ -84,6 +110,10 @@ final class MonitorStore {
         plan.needsPower = (s.config(.cpu).enabled && s.config(.cpu).metric == .cpuPower)
             || (s.config(.gpu).enabled && s.config(.gpu).metric == .gpuPower)
         if processWindowOpen { plan.detail.formUnion([.cpu, .network]) }
+        if overviewOpen {
+            plan.widgets.formUnion(WidgetKind.allCases)
+            plan.detail.insert(.cpu)
+        }
         guard plan != lastPlan else { return }
         lastPlan = plan
         engine.update(plan)
@@ -98,14 +128,26 @@ final class MonitorStore {
             for f in onFrame { f() }
             return
         }
-        if let v = frame.cpu { cpu = v }
+        if let v = frame.cpu {
+            cpu = v
+            coreSamples.append((frame.time, v.perCore))
+            if coreSamples.count > 60 { coreSamples.removeFirst(coreSamples.count - 60) }
+        }
         if let v = frame.memory { memory = v }
         if let v = frame.disk { disk = v }
         if let v = frame.temperature { temperature = v }
         if let v = frame.gpu { gpu = v }
         if let v = frame.network { network = v }
         if let v = frame.battery { battery = v }
-        if let v = frame.processes { processes = v }
+        if let v = frame.processes {
+            processes = v
+            if processWindowOpen {
+                let limit = max(10, Int(60 / max(1, settings.settings.refreshInterval)))
+                var next: [Int32: [Double]] = [:]
+                for p in v { next[p.pid] = Array(((cpuTrails[p.pid] ?? []) + [p.cpu]).suffix(limit)) }
+                cpuTrails = next
+            }
+        }
 
         let values = SeriesKey.values(in: frame)
         for (key, value) in values { histories[key, default: SeriesHistory()].append(value, at: frame.time) }
@@ -118,6 +160,7 @@ final class MonitorStore {
             let widgets = Set(alertEngine.active.compactMap { rulesByID[$0]?.metric.widget })
             if widgets != activeAlertWidgets { activeAlertWidgets = widgets }
             for event in fired { Notifier.shared.post(event) }
+            if !fired.isEmpty { recentAlerts = Array((recentAlerts + fired).suffix(100)) }
         } else if !activeAlertWidgets.isEmpty {
             activeAlertWidgets = []
         }
@@ -151,6 +194,12 @@ final class MonitorStore {
     }
 
     func flushHistory() { historyStore?.flush(final: true) }
+
+    /// Reading this registers the caller for history updates.
+    func coreHistory() -> [(time: Date, usage: [Double])] {
+        _ = historyTick
+        return coreSamples
+    }
 
     /// Reading this registers the caller for history updates.
     func series(_ key: SeriesKey) -> SeriesHistory? {
