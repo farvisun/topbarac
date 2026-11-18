@@ -108,10 +108,26 @@ struct OverviewContent: View {
     }
 }
 
-/// Hook for sections that sit above the cards (health check, sleep blockers, accessories).
+/// Health check above the cards; what keeps the Mac awake and accessory batteries below it.
 struct OverviewExtras: View {
     var open: (WidgetKind) -> Void
-    var body: some View { EmptyView() }
+    @State private var blockers: [SleepBlocker] = []
+    @State private var accessories: [BluetoothBattery] = ExtrasLoader.cachedAccessories
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.gap) {
+            HealthCheck()
+            SleepBlockersSection(blockers: blockers)
+            AccessoriesSection(list: accessories, compact: true)
+        }
+        .task {
+            while !Task.isCancelled {
+                blockers = await ExtrasLoader.blockers()
+                accessories = await ExtrasLoader.accessories()
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
 }
 
 private struct OverviewHeader: View {
@@ -202,11 +218,11 @@ struct MiniCard: View {
         case .temperature: .tempHottest
         case .gpu: .gpuUsage
         case .network: .netDown
-        case .battery: .batteryWatts
+        case .battery: .battery
         }
     }
 
-    private var fixedScale: Bool { [.cpu, .memory, .gpu].contains(kind) }
+    private var fixedScale: Bool { [.cpu, .memory, .gpu, .battery].contains(kind) }
 
     private var figures: (main: String, sub: String) {
         let s = settings.settings
