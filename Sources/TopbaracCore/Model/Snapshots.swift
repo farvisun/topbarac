@@ -266,5 +266,7 @@ public struct SampleFrame: Sendable {
     public var network: NetworkSnapshot?
     public var battery: BatterySnapshot?
     public var processes: [ProcessSample]?
+    /// Seconds covered by `processes` (time since the previous process sample), for turning rates into totals.
+    public var processInterval: TimeInterval?
     public init(time: Date, gap: Bool = false) { self.time = time; self.gap = gap }
 }

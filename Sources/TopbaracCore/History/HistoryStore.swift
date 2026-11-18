@@ -32,6 +32,17 @@ public struct BucketAccumulator: Sendable {
     }
 }
 
+/// Total CPU time and energy one app used over a period.
+public struct AppUsage: Sendable, Equatable, Identifiable {
+    public var id: String { name }
+    public var name: String
+    public var cpuSeconds: Double
+    public var energyJoules: Double
+    public init(name: String, cpuSeconds: Double, energyJoules: Double) {
+        self.name = name; self.cpuSeconds = cpuSeconds; self.energyJoules = energyJoules
+    }
+}
+
 /// Opt-in on-disk history. Three tiers, each fed directly from live samples:
 /// tier 0 = 10 s averages (kept 7 days), tier 1 = 1 min averages (kept 90 days), tier 2 = 10 min averages (kept for the
 /// chosen retention, "forever" by default). Writes are batched once a minute.
@@ -42,6 +53,10 @@ public final class HistoryStore: @unchecked Sendable {
     private var db: OpaquePointer?
     private var accumulators: [SeriesKey: [BucketAccumulator]] = [:]
     private var pending: [(SeriesKey, Int, Int, Double)] = []   // series, tier, time, value
+    /// Unflushed app usage per hourly bucket and app name: (cpu seconds, joules), added to the stored row on flush.
+    private var pendingUsage: [UsageKey: (cpu: Double, energy: Double)] = [:]
+    private struct UsageKey: Hashable { var bucket: Int; var name: String }
+    public static let appUsageBucket = 3600
     private var lastFlush = Date()
     public let url: URL
 
@@ -58,6 +73,11 @@ public final class HistoryStore: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS samples (
               series TEXT NOT NULL, tier INTEGER NOT NULL, t INTEGER NOT NULL, v REAL NOT NULL,
               PRIMARY KEY (series, tier, t)) WITHOUT ROWID
+            """)
+        exec("""
+            CREATE TABLE IF NOT EXISTS app_usage (
+              bucket INTEGER NOT NULL, name TEXT NOT NULL, cpu_s REAL NOT NULL, energy_j REAL NOT NULL,
+              PRIMARY KEY (bucket, name)) WITHOUT ROWID
             """)
     }
 
@@ -84,6 +104,48 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Adds one process sample to the hourly per-app totals: CPU % × seconds becomes CPU seconds, watts × seconds
+    /// becomes joules. Idle processes are skipped so the table holds apps that did something, not every daemon.
+    /// `interval` is `SampleFrame.processInterval`. Written by the regular once-a-minute flush.
+    public func recordAppUsage(_ processes: [ProcessSample], interval: TimeInterval, at time: Date) {
+        guard interval > 0, interval.isFinite else { return }
+        queue.async { [self] in
+            let bucket = Int(time.timeIntervalSince1970) / Self.appUsageBucket * Self.appUsageBucket
+            for p in processes {
+                let energy = p.energyWatts.map { $0 * interval } ?? 0
+                guard p.cpu >= 0.05 || energy > 0, p.cpu.isFinite, energy.isFinite else { continue }
+                let key = UsageKey(bucket: bucket, name: p.name)
+                let current = pendingUsage[key] ?? (0, 0)
+                pendingUsage[key] = (current.cpu + max(0, p.cpu) / 100 * interval, current.energy + max(0, energy))
+            }
+            if time.timeIntervalSince(lastFlush) >= 60 { flushLocked() }
+        }
+    }
+
+    /// Apps by CPU time since `since`, most first, including data not yet written.
+    public func appUsage(since: Date, limit: Int) -> [AppUsage] {
+        queue.sync { [self] in
+            flushLocked()
+            let sql = """
+                SELECT name, SUM(cpu_s) AS cpu, SUM(energy_j) FROM app_usage WHERE bucket >= ?
+                GROUP BY name ORDER BY cpu DESC, name LIMIT ?
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            // The bucket holding `since` counts: hourly rows can't be split.
+            let first = Int64(since.timeIntervalSince1970) / Int64(Self.appUsageBucket) * Int64(Self.appUsageBucket)
+            sqlite3_bind_int64(stmt, 1, first)
+            sqlite3_bind_int64(stmt, 2, Int64(max(0, limit)))
+            var out: [AppUsage] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                out.append(AppUsage(name: String(cString: sqlite3_column_text(stmt, 0)),
+                                    cpuSeconds: sqlite3_column_double(stmt, 1), energyJoules: sqlite3_column_double(stmt, 2)))
+            }
+            return out
+        }
+    }
+
     /// Writes everything buffered, including open buckets when `final` (app quitting or history turned off).
     public func flush(final: Bool = false) {
         queue.sync { [self] in
@@ -100,8 +162,27 @@ public final class HistoryStore: @unchecked Sendable {
 
     private func flushLocked() {
         lastFlush = Date()
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty || !pendingUsage.isEmpty else { return }
         exec("BEGIN")
+        if !pendingUsage.isEmpty {
+            var usage: OpaquePointer?
+            let sql = """
+                INSERT INTO app_usage (bucket, name, cpu_s, energy_j) VALUES (?, ?, ?, ?)
+                ON CONFLICT(bucket, name) DO UPDATE SET cpu_s = cpu_s + excluded.cpu_s, energy_j = energy_j + excluded.energy_j
+                """
+            if sqlite3_prepare_v2(db, sql, -1, &usage, nil) == SQLITE_OK {
+                for (key, value) in pendingUsage {
+                    sqlite3_bind_int64(usage, 1, Int64(key.bucket))
+                    sqlite3_bind_text(usage, 2, key.name, -1, SQLITE_TRANSIENT)
+                    sqlite3_bind_double(usage, 3, value.cpu)
+                    sqlite3_bind_double(usage, 4, value.energy)
+                    sqlite3_step(usage)
+                    sqlite3_reset(usage)
+                }
+            }
+            sqlite3_finalize(usage)
+            pendingUsage.removeAll(keepingCapacity: true)
+        }
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO samples (series, tier, t, v) VALUES (?, ?, ?, ?)", -1, &stmt, nil) == SQLITE_OK {
             for (key, tier, t, v) in pending {
@@ -126,6 +207,9 @@ public final class HistoryStore: @unchecked Sendable {
                 guard let keep = limits.min() else { continue }
                 let cutoff = Int64(now.timeIntervalSince1970 - keep)
                 exec("DELETE FROM samples WHERE tier = \(i) AND t < \(cutoff)")
+            }
+            if let retention {
+                exec("DELETE FROM app_usage WHERE bucket < \(Int64(now.timeIntervalSince1970 - retention))")
             }
         }
     }
@@ -184,8 +268,10 @@ public final class HistoryStore: @unchecked Sendable {
     public func clear() {
         queue.sync { [self] in
             pending.removeAll()
+            pendingUsage.removeAll()
             accumulators.removeAll()
             exec("DELETE FROM samples")
+            exec("DELETE FROM app_usage")
             exec("VACUUM")
         }
     }

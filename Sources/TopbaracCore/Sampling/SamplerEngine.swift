@@ -12,6 +12,9 @@ public struct SamplingPlan: Sendable, Equatable {
     public var background: Set<WidgetKind> = []
     /// Frequency and power (IOReport) cost more than everything else together; read them only when shown.
     public var needsPower = false
+    /// App usage history is on: sample processes every `appUsageInterval` seconds even with no popover open, so
+    /// per-app CPU and energy can be accumulated. Rarely enough that the `ps` call costs nothing noticeable.
+    public var appUsage = false
     public init() {}
 }
 
@@ -37,6 +40,11 @@ public final class SamplerEngine: @unchecked Sendable {
 
     private var lastTemperature: TemperatureSnapshot?
     private var lastBattery: BatterySnapshot?
+    /// Uptime of the previous process sample; nil after a gap, when the probe's deltas restart too.
+    private var lastProcessSample: TimeInterval?
+
+    /// Seconds between background process samples for app usage history.
+    public static let appUsageInterval: TimeInterval = 30
 
     private let deliver: @Sendable (SampleFrame) -> Void
 
@@ -72,6 +80,7 @@ public final class SamplerEngine: @unchecked Sendable {
     private func markGapLocked() {
         pendingGap = true
         cpu.reset(); disk.reset(); network.reset(); processes.reset(); ioreport.reset()
+        lastProcessSample = nil
     }
 
     private func restartTimer() {
@@ -126,8 +135,14 @@ public final class SamplerEngine: @unchecked Sendable {
             if plan.detail.contains(.battery) || tick % 5 == 1 || lastBattery == nil { lastBattery = battery.sample() }
             frame.battery = lastBattery
         }
-        if !plan.detail.isEmpty {
+        // Every tick while a popover shows the list; otherwise every 30 s when app usage history wants it.
+        let now = ProcessInfo.processInfo.systemUptime
+        let usageDue = plan.appUsage && lastProcessSample.map { now - $0 >= Self.appUsageInterval - 0.5 } ?? true
+        if !plan.detail.isEmpty || usageDue {
             frame.processes = processes.sample(includeOtherUsers: true, network: plan.detail.contains(.network) ? nettop.rates : [:])
+            // The probe's rates are averages since its previous sample, so this is the span they cover.
+            frame.processInterval = lastProcessSample.map { now - $0 }
+            lastProcessSample = now
         }
         deliver(frame)
     }
