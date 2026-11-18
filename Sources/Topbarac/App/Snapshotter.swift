@@ -37,9 +37,9 @@ enum Snapshotter {
             capture(PopoverChrome { OverviewContent { _ in }.padding(DS.pad) }, appearance: ap,
                     to: dir.appendingPathComponent("overview-\(name).png"), settle: 3)
             capture(WelcomeView {}, appearance: ap, to: dir.appendingPathComponent("welcome-\(name).png"))
-            capture(ProcessesWindow(sort: .cpu).frame(width: 760, height: 420), appearance: ap,
+            capture(ProcessesWindow(sort: .cpu).frame(width: 880, height: 420), appearance: ap,
                     to: dir.appendingPathComponent("processes-\(name).png"))
-            capture(StorageWindow().frame(width: 680, height: 460), appearance: ap,
+            capture(StorageWindow().frame(width: 680, height: 418), appearance: ap,
                     to: dir.appendingPathComponent("storage-\(name).png"), settle: 8)
             capture(StylesSheet(), appearance: ap, to: dir.appendingPathComponent("styles-\(name).png"))
             capture(SettingsView().frame(width: 780, height: 600), appearance: ap, to: dir.appendingPathComponent("settings-\(name).png"))
