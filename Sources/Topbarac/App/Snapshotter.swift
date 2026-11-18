@@ -16,9 +16,13 @@ enum Snapshotter {
         for kind in WidgetKind.allCases { store.openDetail(kind) }
         store.setOverview(open: true)
         store.setProcessWindow(open: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
-            captureAll(to: dir)
-            NSApp.terminate(nil)
+        // A run loop timer, not a main-queue block: the capture spins nested run loops while async views load, and
+        // the main queue isn't drained re-entrantly from inside one of its own blocks.
+        Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                captureAll(to: dir)
+                NSApp.terminate(nil)
+            }
         }
         return true
     }
@@ -28,20 +32,22 @@ enum Snapshotter {
             let ap = NSAppearance(named: appearance)!
             for kind in WidgetKind.allCases {
                 capture(PopoverChrome { WidgetContent(kind: kind).padding(DS.pad) }, appearance: ap,
-                        to: dir.appendingPathComponent("\(kind.rawValue)-\(name).png"))
+                        to: dir.appendingPathComponent("\(kind.rawValue)-\(name).png"), settle: kind == .network ? 5 : 0.6)
             }
             capture(PopoverChrome { OverviewContent { _ in }.padding(DS.pad) }, appearance: ap,
-                    to: dir.appendingPathComponent("overview-\(name).png"))
+                    to: dir.appendingPathComponent("overview-\(name).png"), settle: 3)
             capture(WelcomeView {}, appearance: ap, to: dir.appendingPathComponent("welcome-\(name).png"))
             capture(ProcessesWindow(sort: .cpu).frame(width: 760, height: 420), appearance: ap,
                     to: dir.appendingPathComponent("processes-\(name).png"))
+            capture(StorageWindow().frame(width: 680, height: 460), appearance: ap,
+                    to: dir.appendingPathComponent("storage-\(name).png"), settle: 8)
             capture(StylesSheet(), appearance: ap, to: dir.appendingPathComponent("styles-\(name).png"))
             capture(SettingsView().frame(width: 780, height: 600), appearance: ap, to: dir.appendingPathComponent("settings-\(name).png"))
         }
     }
 
     @MainActor
-    private static func capture<V: View>(_ view: V, appearance: NSAppearance, to url: URL) {
+    private static func capture<V: View>(_ view: V, appearance: NSAppearance, to url: URL, settle: TimeInterval = 0.6) {
         let root = view
             .environment(MonitorStore.shared)
             .environment(SettingsStore.shared)
@@ -57,7 +63,16 @@ enum Snapshotter {
         window.orderFrontRegardless()
         host.layoutSubtreeIfNeeded()
         host.display()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        RunLoop.current.run(until: Date().addingTimeInterval(settle))
+        // Views that loaded data while settling may have grown.
+        let grown = host.fittingSize
+        if grown != host.frame.size {
+            host.frame = NSRect(origin: .zero, size: grown)
+            window.setContentSize(grown)
+            host.layoutSubtreeIfNeeded()
+            host.display()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
         host.cacheDisplay(in: host.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
