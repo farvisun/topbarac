@@ -137,6 +137,17 @@ public enum HistoryRetention: String, Codable, CaseIterable, Sendable, Identifia
     }
 }
 
+/// A global keyboard shortcut. Key code and modifier flags are Carbon values (what `RegisterEventHotKey` takes);
+/// `display` is the label shown in Settings ("⌥⌘M").
+public struct Hotkey: Codable, Sendable, Equatable {
+    public var keyCode: UInt32
+    public var modifiers: UInt32
+    public var display: String
+    public init(keyCode: UInt32, modifiers: UInt32, display: String) {
+        self.keyCode = keyCode; self.modifiers = modifiers; self.display = display
+    }
+}
+
 public struct AppSettings: Codable, Sendable, Equatable {
     public var widgets: [WidgetKind: WidgetConfig]
     /// Order used in merged mode and in the settings sidebar.
@@ -152,6 +163,14 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var alertRules: [AlertRule] = AlertRule.defaults
     public var alertsEnabled = true
     public var protectSystemProcesses = true
+    /// Separate menu bar item with the overview (health summary of every widget).
+    public var showOverviewItem = true
+    /// Opens the overview (or the combined item) from anywhere.
+    public var hotkey: Hotkey?
+    /// Latency target besides the router, pinged only while the Network popover is open.
+    public var latencyHost = "1.1.1.1"
+    /// The welcome window was shown.
+    public var onboarded = false
 
     public init() {
         widgets = Dictionary(uniqueKeysWithValues: WidgetKind.allCases.map { ($0, WidgetConfig.defaults(for: $0)) })
@@ -183,6 +202,11 @@ public struct AppSettings: Codable, Sendable, Equatable {
         alertRules = (try? c.decode([AlertRule].self, forKey: .alertRules)) ?? alertRules
         alertsEnabled = (try? c.decode(Bool.self, forKey: .alertsEnabled)) ?? alertsEnabled
         protectSystemProcesses = (try? c.decode(Bool.self, forKey: .protectSystemProcesses)) ?? protectSystemProcesses
+        showOverviewItem = (try? c.decode(Bool.self, forKey: .showOverviewItem)) ?? showOverviewItem
+        hotkey = try? c.decode(Hotkey.self, forKey: .hotkey)
+        latencyHost = (try? c.decode(String.self, forKey: .latencyHost)) ?? latencyHost
+        // Settings saved before the welcome window existed belong to someone who already set the app up.
+        onboarded = (try? c.decode(Bool.self, forKey: .onboarded)) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -200,10 +224,15 @@ public struct AppSettings: Codable, Sendable, Equatable {
         try c.encode(alertRules, forKey: .alertRules)
         try c.encode(alertsEnabled, forKey: .alertsEnabled)
         try c.encode(protectSystemProcesses, forKey: .protectSystemProcesses)
+        try c.encode(showOverviewItem, forKey: .showOverviewItem)
+        try c.encodeIfPresent(hotkey, forKey: .hotkey)
+        try c.encode(latencyHost, forKey: .latencyHost)
+        try c.encode(onboarded, forKey: .onboarded)
     }
 
     private enum CodingKeys: String, CodingKey {
         case widgets, order, refreshInterval, temperatureUnit, networkUnit, mergedMode, mergedShowsIcons, flashOnCritical
         case historyEnabled, historyRetention, alertRules, alertsEnabled, protectSystemProcesses
+        case showOverviewItem, hotkey, latencyHost, onboarded
     }
 }

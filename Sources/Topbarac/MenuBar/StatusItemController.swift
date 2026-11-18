@@ -9,12 +9,14 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let panel = PanelView()
         let kinds: [WidgetKind]       // one kind, or every enabled kind in merged mode
         let merged: Bool
+        let overview: Bool
         var popover: NSPopover?
 
-        init(statusItem: NSStatusItem, kinds: [WidgetKind], merged: Bool) {
+        init(statusItem: NSStatusItem, kinds: [WidgetKind], merged: Bool, overview: Bool = false) {
             self.statusItem = statusItem
             self.kinds = kinds
             self.merged = merged
+            self.overview = overview
         }
     }
 
@@ -33,6 +35,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         settingsStore.observe { [weak self] old, new in
             guard let self else { return }
             let layoutChanged = old.mergedMode != new.mergedMode || old.enabledWidgets != new.enabledWidgets
+                || old.showOverviewItem != new.showOverviewItem
             if layoutChanged { rebuild() } else { refresh() }
         }
     }
@@ -51,14 +54,16 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             for kind in s.enabledWidgets.reversed() { make(id: kind.rawValue, kinds: [kind], merged: false) }
         }
         if items.isEmpty { make(id: "empty", kinds: [], merged: true) }
+        // Rightmost of our items: created last. Merged mode has its own overview tab.
+        if s.showOverviewItem && !s.mergedMode { make(id: "overview", kinds: [], merged: false, overview: true) }
         refresh()
     }
 
-    private func make(id: String, kinds: [WidgetKind], merged: Bool) {
+    private func make(id: String, kinds: [WidgetKind], merged: Bool, overview: Bool = false) {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.autosaveName = "topbarac.\(id)"
         statusItem.behavior = [.removalAllowed]
-        let item = Item(statusItem: statusItem, kinds: kinds, merged: merged)
+        let item = Item(statusItem: statusItem, kinds: kinds, merged: merged, overview: overview)
         if let button = statusItem.button {
             button.title = ""
             button.imagePosition = .imageOnly
@@ -77,6 +82,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let s = settingsStore.settings
         flashPhase.toggle()
         for item in items.values {
+            if item.overview {
+                refreshOverview(item)
+                continue
+            }
             if item.kinds.isEmpty {
                 item.panel.segments = []
                 item.statusItem.length = 24
@@ -108,6 +117,30 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
     }
 
+    /// The overview item is a gauge glyph, tinted when any widget is past its threshold or an alert holds.
+    private var overviewLevel: Level = .normal
+    private var overviewDrawn = false
+
+    private func refreshOverview(_ item: Item) {
+        let s = settingsStore.settings
+        var level = Level.normal
+        for kind in WidgetKind.allCases where s.config(kind).enabled || store.openDetails.contains(kind) {
+            level = max(level, PanelValue.make(kind, store: store, settings: s).level)
+        }
+        if !store.activeAlertWidgets.isEmpty { level = .critical }
+        guard !overviewDrawn || level != overviewLevel else { return }
+        overviewDrawn = true
+        overviewLevel = level
+        let symbol = level == .normal ? "gauge.with.dots.needle.33percent" : "gauge.with.dots.needle.100percent"
+        var config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        if let color = level.nsColor { config = config.applying(.init(paletteColors: [color])) }
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Topbarac overview")?.withSymbolConfiguration(config)
+        image?.isTemplate = level == .normal
+        item.statusItem.length = 26
+        item.statusItem.button?.image = image
+        item.statusItem.button?.setAccessibilityLabel(level == .normal ? "Topbarac overview" : "Topbarac overview, \(level.title.lowercased())")
+    }
+
     // MARK: Popover
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
@@ -118,13 +151,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         if openPopoverItem === item { closePopover(); return }
         closePopover()
-        if item.kinds.isEmpty { AppDelegate.shared.openSettings(); return }
+        if item.kinds.isEmpty && !item.overview { AppDelegate.shared.openSettings(); return }
         show(item)
+    }
+
+    /// Global shortcut: the overview item, else the combined item, else the first widget. Pressing it again closes.
+    func toggleMain() {
+        if openPopoverItem != nil { closePopover(); return }
+        let s = settingsStore.settings
+        if let item = items["overview"] ?? items["merged"] ?? s.enabledWidgets.lazy.compactMap({ self.items[$0.rawValue] }).first {
+            if item.merged { mergedSelection.showingOverview = true }
+            show(item)
+        }
     }
 
     func open(_ kind: WidgetKind) {
         guard let item = items[kind.rawValue] ?? items["merged"] else { return }
-        if item.merged { mergedSelection.kind = kind }
+        if item.merged { mergedSelection.kind = kind; mergedSelection.showingOverview = false }
         closePopover()
         show(item)
     }
@@ -135,15 +178,21 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        let root: AnyView = item.merged
-            ? AnyView(MergedPopover(kinds: item.kinds, selection: mergedSelection))
+        let root: AnyView = item.overview ? AnyView(OverviewPopover())
+            : item.merged ? AnyView(MergedPopover(kinds: item.kinds, selection: mergedSelection))
             : AnyView(WidgetPopover(kind: item.kinds[0]))
         let host = NSHostingController(rootView: root.environment(store).environment(settingsStore))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         item.popover = popover
         openPopoverItem = item
-        if item.merged { store.openDetail(mergedSelection.kind ?? item.kinds.first ?? .cpu) } else { store.openDetail(item.kinds[0]) }
+        if item.overview {
+            store.setOverview(open: true)
+        } else if item.merged {
+            if mergedSelection.showingOverview { store.setOverview(open: true) } else { store.openDetail(mergedSelection.kind ?? item.kinds.first ?? .cpu) }
+        } else {
+            store.openDetail(item.kinds[0])
+        }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
     }
@@ -155,15 +204,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         guard let item = openPopoverItem else { return }
         for kind in WidgetKind.allCases where store.openDetails.contains(kind) { store.closeDetail(kind) }
+        store.setOverview(open: false)
         item.popover?.contentViewController = nil
         item.popover = nil
         openPopoverItem = nil
     }
 
-    /// Merged mode: switching tabs moves detail sampling to the new widget.
-    func mergedTabChanged(to kind: WidgetKind) {
+    /// Merged mode: switching tabs moves detail sampling to the new widget (nil = overview).
+    func mergedTabChanged(to kind: WidgetKind?) {
         for k in store.openDetails where k != kind { store.closeDetail(k) }
-        store.openDetail(kind)
+        store.setOverview(open: kind == nil)
+        if let kind { store.openDetail(kind) }
     }
 
     // MARK: Menu
@@ -201,4 +252,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 @Observable
 final class MergedSelection {
     var kind: WidgetKind?
+    /// The overview tab is what the combined item opens to first.
+    var showingOverview = true
 }

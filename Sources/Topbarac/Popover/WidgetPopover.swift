@@ -23,35 +23,23 @@ struct WidgetPopover: View {
     }
 }
 
-/// Combined mode: one popover with a tab per widget.
+/// Combined mode: one popover with an overview tab and a tab per widget.
 struct MergedPopover: View {
     var kinds: [WidgetKind]
     @Bindable var selection: MergedSelection
     @State private var toasts = ToastCenter()
 
-    private var current: WidgetKind { selection.kind.flatMap { kinds.contains($0) ? $0 : nil } ?? kinds.first ?? .cpu }
+    private var current: WidgetKind? {
+        if selection.showingOverview { return nil }
+        return selection.kind.flatMap { kinds.contains($0) ? $0 : nil } ?? kinds.first
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 2) {
+                tab(symbol: "square.grid.2x2", title: "Overview", accent: Color(red: 0.45, green: 0.42, blue: 0.98), selected: current == nil) { select(nil) }
                 ForEach(kinds) { kind in
-                    Button {
-                        withAnimation(.smooth(duration: 0.2)) { selection.kind = kind }
-                        AppDelegate.shared.statusItems?.mergedTabChanged(to: kind)
-                    } label: {
-                        Image(systemName: kind.symbol)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 24)
-                            .foregroundStyle(kind == current ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                            .background {
-                                if kind == current { Capsule().fill(kind.accent.gradient) }
-                            }
-                            .contentShape(.capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .help(kind.title)
-                    .accessibilityLabel(kind.title)
-                    .accessibilityAddTraits(kind == current ? .isSelected : [])
+                    tab(symbol: kind.symbol, title: kind.title, accent: kind.accent, selected: current == kind) { select(kind) }
                 }
             }
             .padding(3)
@@ -60,7 +48,14 @@ struct MergedPopover: View {
 
             ZStack(alignment: .bottom) {
                 ScrollView(.vertical) {
-                    WidgetContent(kind: current).id(current).padding(DS.pad)
+                    Group {
+                        if let current {
+                            WidgetContent(kind: current).id(current)
+                        } else {
+                            OverviewContent { select($0) }
+                        }
+                    }
+                    .padding(DS.pad)
                 }
                 .scrollIndicators(.never)
                 .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 900) - 100)
@@ -71,6 +66,30 @@ struct MergedPopover: View {
         .frame(width: Metrics.popoverWidth)
         .environment(toasts)
         .animation(.smooth(duration: 0.25), value: toasts.current)
+        .background { WidgetShortcuts { kind in if kind == nil || kinds.contains(kind!) { select(kind) } } }
+    }
+
+    private func tab(symbol: String, title: String, accent: Color, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 24)
+                .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .background { if selected { Capsule().fill(accent.gradient) } }
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func select(_ kind: WidgetKind?) {
+        withAnimation(.smooth(duration: 0.2)) {
+            selection.showingOverview = kind == nil
+            if let kind { selection.kind = kind }
+        }
+        AppDelegate.shared.statusItems?.mergedTabChanged(to: kind)
     }
 }
 
@@ -114,15 +133,7 @@ struct PopoverHeader: View {
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 4)
-            HStack(spacing: 0) {
-                IconButton(symbol: "chart.bar.xaxis", help: "Open Activity Monitor") { ProcessActions.openActivityMonitor() }
-                IconButton(symbol: store.paused ? "play.fill" : "pause.fill", help: store.paused ? "Resume monitoring" : "Pause monitoring") {
-                    store.setPaused(!store.paused)
-                    AppDelegate.shared.statusItems?.refresh()
-                }
-                IconButton(symbol: "gearshape", help: "Settings") { AppDelegate.shared.openSettings() }
-                IconButton(symbol: "power", help: "Quit Topbarac") { NSApp.terminate(nil) }
-            }
+            HeaderActions()
         }
         .frame(height: 30)
     }
