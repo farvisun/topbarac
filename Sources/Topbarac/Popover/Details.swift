@@ -348,6 +348,9 @@ struct DiskDetail: View {
                         Button("Show") { SystemActions.reveal(SystemActions.cachesURL) }
                             .help("Topbarac never deletes caches itself. Remove what you don't need in Finder.")
                     }
+                    CleanupRow(symbol: "chart.pie", title: "Where did the space go?", detail: "") {
+                        Button("Analyze…") { AppDelegate.shared.openStorage() }
+                    }
                 }
             }
         }
@@ -640,6 +643,7 @@ struct NetworkDetail: View {
                     }
                 }
             }
+            LinkSection()
         }
     }
 
@@ -658,6 +662,7 @@ struct NetworkDetail: View {
 struct BatteryDetail: View {
     @Environment(MonitorStore.self) private var store
     @Environment(SettingsStore.self) private var settings
+    @State private var accessories: [BluetoothBattery] = ExtrasLoader.cachedAccessories
 
     var body: some View {
         let b = store.battery ?? BatterySnapshot()
@@ -696,6 +701,13 @@ struct BatteryDetail: View {
                         ("Adapter", b.adapterWatts.map { "\(Int($0)) W" }),
                     ].compactMap { label, value in value.map { (label, $0) } })
                 }
+            }
+            AccessoriesSection(list: accessories)
+        }
+        .task {
+            while !Task.isCancelled {
+                accessories = await ExtrasLoader.accessories()
+                try? await Task.sleep(for: .seconds(60))
             }
         }
     }
