@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Topbarac: system monitor for the macOS menu bar</title>
+<meta name="description" content="Topbarac is a free, open-source macOS menu bar app with CPU, memory, disk, temperature, GPU, network and battery widgets. Liquid Glass popovers, no accounts, no telemetry.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://farvisun.github.io/topbarac/">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Topbarac">
+<meta property="og:title" content="Topbarac: your whole Mac, one glance up">
+<meta property="og:description" content="Seven menu bar widgets for macOS 26: CPU, memory, disk, temperature, GPU, network and battery. Free, open source, no telemetry.">
+<meta property="og:url" content="https://farvisun.github.io/topbarac/">
+<meta property="og:image" content="https://farvisun.github.io/topbarac/assets/shots/cpu-dark.png">
+<meta property="og:image:alt" content="The Topbarac CPU popover with usage, a per-core chart and top processes">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Topbarac: your whole Mac, one glance up">
+<meta name="twitter:description" content="Seven menu bar widgets for macOS 26. Free, open source, no telemetry.">
+<meta name="twitter:image" content="https://farvisun.github.io/topbarac/assets/shots/cpu-dark.png">
+<meta name="twitter:image:alt" content="The Topbarac CPU popover with usage, a per-core chart and top processes">
+<style>
+:root{
+  --bg:#0a0a0f;--bg2:#111118;--text:#f5f5f7;--muted:#a1a1a6;--line:rgba(255,255,255,.09);
+  --card:rgba(255,255,255,.045);--card-hi:rgba(255,255,255,.07);--code:rgba(0,0,0,.35);
+  --link:#7aa8ff;--focus:#8ab4ff;
+  --g1:#4085ff;--g2:#9e66fa;--g3:#ff8c33;
+  --grad:linear-gradient(100deg,var(--g1),var(--g2) 55%,var(--g3));
+  --btn:linear-gradient(135deg,#2563eb,#7c3aed);
+  --shadow:0 30px 60px -20px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.06);
+  --radius:22px;--max:1100px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:light){
+  :root{
+    --bg:#fbfbfd;--bg2:#f2f2f7;--text:#1d1d1f;--muted:#5e5e63;--line:rgba(0,0,0,.08);
+    --card:rgba(255,255,255,.72);--card-hi:rgba(255,255,255,.9);--code:rgba(0,0,0,.05);
+    --link:#0058c7;--focus:#0058c7;
+    --g1:#1f62f0;--g2:#7c3aed;--g3:#d9580a;
+    --shadow:0 30px 60px -24px rgba(30,40,80,.28),0 0 0 1px rgba(0,0,0,.06);
+  }
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.55 var(--font);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:-20vh -20vw auto;height:120vh;z-index:-1;pointer-events:none;
+  background:radial-gradient(40% 35% at 20% 20%,rgba(64,133,255,.18),transparent 70%),
+  radial-gradient(35% 30% at 80% 15%,rgba(158,102,250,.16),transparent 70%),
+  radial-gradient(30% 25% at 60% 60%,rgba(255,140,51,.08),transparent 70%)}
+img{max-width:100%;height:auto}
+a{color:var(--link);text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:3px;border-radius:8px}
+h1,h2,h3{line-height:1.1;letter-spacing:-.02em;margin:0}
+p{margin:0 0 1em}
+code,pre{font-family:var(--mono);font-size:.88em}
+:not(pre)>code{background:var(--code);padding:.1em .4em;border-radius:6px}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:12px;top:-60px;z-index:100;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;text-decoration:none}
+.skip:focus{top:12px}
+.grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:var(--g2);-webkit-text-fill-color:transparent}
+
+/* nav */
+header.top{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 70%,transparent);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;gap:20px;height:56px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;color:var(--text);text-decoration:none;flex:none}
+.brand img{width:28px;height:28px}
+.nav nav{min-width:0;flex:1 1 auto;display:flex;justify-content:flex-end}
+.nav ul{display:flex;gap:4px;min-width:0;list-style:none;margin:0 0 0 auto;padding:0;overflow-x:auto;scrollbar-width:none}
+.nav ul::-webkit-scrollbar{display:none}
+.nav ul a{display:block;padding:6px 10px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:14px;white-space:nowrap}
+.nav ul a:hover{color:var(--text);background:var(--card)}
+.nav .gh{color:var(--text);font-weight:600}
+
+/* hero */
+.hero{padding:88px 0 40px;display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--muted);border:1px solid var(--line);background:var(--card);padding:6px 12px;border-radius:999px;margin-bottom:24px}
+.eyebrow img{width:20px;height:20px}
+.hero h1{font-size:clamp(42px,6.4vw,76px);font-weight:750;letter-spacing:-.035em}
+.hero h1 span{display:block}
+.lead{font-size:clamp(18px,2vw,21px);color:var(--muted);max-width:34em;margin:24px 0 32px}
+.btns{display:flex;flex-wrap:wrap;gap:12px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:999px;font-weight:600;text-decoration:none;font-size:16px;transition:transform .2s,box-shadow .2s,background .2s}
+.btn.primary{background:var(--btn);color:#fff;box-shadow:0 10px 30px -10px rgba(91,80,240,.7)}
+.btn.ghost{color:var(--text);background:var(--card);border:1px solid var(--line)}
+.btn:hover{transform:translateY(-1px)}
+.btn.ghost:hover{background:var(--card-hi)}
+.btn svg{width:18px;height:18px;flex:none}
+.fine{font-size:14px;color:var(--muted);margin-top:18px}
+.fan{position:relative;height:560px}
+.fan .frame{position:absolute;width:300px;top:0;left:50%;margin-left:-150px;max-height:520px}
+.fan .f2{transform:translate(-120px,40px) rotate(-7deg) scale(.88);opacity:.85}
+.fan .f3{transform:translate(120px,40px) rotate(7deg) scale(.88);opacity:.85}
+.fan .f1{z-index:2;animation:float 7s ease-in-out infinite}
+@keyframes float{50%{transform:translateY(-8px)}}
+
+/* frames */
+.frame{border-radius:20px;overflow:hidden;box-shadow:var(--shadow);background:var(--bg2);
+  -webkit-mask-image:linear-gradient(#000 78%,transparent);mask-image:linear-gradient(#000 78%,transparent)}
+.frame img{display:block;width:100%}
+.shot{margin:0;display:flex;flex-direction:column;align-items:center;gap:14px}
+.shot .frame{width:min(100%,340px);-webkit-mask-image:none;mask-image:none}
+.shot .frame.wide{width:min(100%,400px)}
+.js .shot .frame{max-height:560px;-webkit-mask-image:linear-gradient(#000 75%,transparent);mask-image:linear-gradient(#000 75%,transparent)}
+.js .shot .frame.open{max-height:none;-webkit-mask-image:none;mask-image:none}
+.more{font:inherit;font-size:14px;font-weight:600;color:var(--link);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer}
+.more:hover{background:var(--card-hi)}
+
+/* stats */
+.stats{list-style:none;margin:24px auto 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.stats li{padding:24px;border-radius:var(--radius)}
+.stats b{display:block;font-size:clamp(40px,5vw,56px);font-weight:750;letter-spacing:-.04em;line-height:1}
+.stats span{display:block;margin-top:10px;color:var(--muted);font-size:15px}
+.glass{background:var(--card);border:1px solid var(--line);-webkit-backdrop-filter:blur(20px) saturate(150%);backdrop-filter:blur(20px) saturate(150%)}
+
+/* sections */
+section{padding:110px 0 0;scroll-margin-top:40px}
+.head{max-width:720px;margin-bottom:56px}
+.head .kick{display:block;font-size:14px;font-weight:650;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}
+.head h2{font-size:clamp(34px,4.6vw,54px);font-weight:720}
+.head p{color:var(--muted);font-size:19px;margin-top:18px}
+.widget{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:56px;align-items:center;padding:56px 0;border-top:1px solid var(--line)}
+.widget.flip .txt{order:2}
+.widget h3{font-size:clamp(28px,3.4vw,40px);font-weight:720}
+.widget .tag{font-size:20px;color:var(--muted);margin:10px 0 22px}
+.label{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
+ul.dots{list-style:none;margin:0;padding:0}
+ul.dots li{position:relative;padding-left:22px;margin:0 0 10px}
+ul.dots li::before{content:"";position:absolute;left:2px;top:.62em;width:8px;height:8px;border-radius:50%;background:var(--grad)}
+.styles-shot{margin:0 0 40px;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:var(--bg2)}
+.styles-shot img{display:block;width:100%}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card{min-width:0;padding:28px;border-radius:var(--radius)}
+.card h3{font-size:21px;font-weight:680;margin-bottom:10px}
+.card p{color:var(--muted);margin:0}
+.card p+p,.card p+ul,.card ul+p{margin-top:12px}
+.card ul.dots{color:var(--muted);margin-top:12px}
+.card ul.dots li{margin-bottom:6px}
+.ico{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--grad);margin-bottom:16px}
+.ico svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* install */
+.cmd{position:relative;margin:14px 0 0}
+.cmd pre{margin:0;padding:14px 16px;padding-right:76px;background:var(--code);border:1px solid var(--line);border-radius:14px;overflow-x:auto;white-space:pre;line-height:1.6;color:var(--text)}
+.copy{position:absolute;top:8px;right:8px;font:600 13px var(--font);color:var(--text);background:var(--card-hi);border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer}
+.copy:hover{background:var(--card)}
+ol.steps{margin:12px 0 0;padding-left:20px;color:var(--muted)}
+ol.steps li{margin-bottom:6px}
+.note{margin-top:22px;padding:18px 22px;border-radius:16px;color:var(--muted)}
+
+/* faq */
+.faq{max-width:820px}
+.faq details{border-top:1px solid var(--line)}
+.faq details:last-child{border-bottom:1px solid var(--line)}
+.faq summary{cursor:pointer;list-style:none;padding:22px 40px 22px 0;font-size:19px;font-weight:620;position:relative}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:26px;font-weight:300;color:var(--muted);transition:transform .2s}
+.faq details[open] summary::after{transform:translateY(-50%) rotate(45deg)}
+.faq details p{color:var(--muted);margin:0 0 22px;max-width:44em}
+
+footer{margin-top:120px;padding:40px 0 56px;border-top:1px solid var(--line);color:var(--muted);font-size:15px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;justify-content:space-between;align-items:center}
+footer nav{display:flex;flex-wrap:wrap;gap:8px 20px}
+footer a{color:var(--muted)}
+footer a:hover{color:var(--text)}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:minmax(0,1fr);padding-top:56px;text-align:center}
+  .hero .lead{margin-left:auto;margin-right:auto}
+  .btns{justify-content:center}
+  .fan{height:480px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .widget{grid-template-columns:minmax(0,1fr);gap:32px}
+  .widget.flip .txt{order:0}
+  .grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
+@media (max-width:640px){
+  body{font-size:16px}
+  .wrap{padding:0 18px}
+  .nav{gap:10px}
+  .brand span{display:none}
+  .nav ul{margin-left:0}
+  .fan .f2,.fan .f3{display:none}
+  .fan{height:auto}
+  .fan .frame{position:relative;left:auto;margin:0 auto;width:min(100%,300px)}
+  .grid,.grid.two{grid-template-columns:minmax(0,1fr)}
+  .stats li{padding:18px}
+  section{padding-top:80px}
+  .head{margin-bottom:36px}
+  .widget{padding:40px 0}
+  .card{padding:22px}
+}
+@media (max-width:380px){
+  .stats{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="Topbarac home"><img src="assets/icon.png" alt="" width="28" height="28"><span>Topbarac</span></a>
+    <nav aria-label="Primary">
+      <ul>
+        <li><a href="#widgets">Widgets</a></li>
+        <li><a href="#styles">Styles</a></li>
+        <li><a href="#manage">Manage</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a class="gh" href="https://github.com/farvisun/topbarac">GitHub</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap hero" id="top">
+    <div>
+      <p class="eyebrow"><img src="assets/icon.png" alt="" width="20" height="20">Free and open source · macOS 26+</p>
+      <h1><span>Your whole Mac,</span> <span class="grad">one glance up.</span></h1>
+      <p class="lead">Topbarac puts CPU, memory, disk, temperature, GPU, network and battery in your menu bar. Click any of them for a Liquid Glass popover with charts, details and the processes behind the numbers.</p>
+      <div class="btns">
+        <a class="btn primary" href="#install"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>Install</a>
+        <a class="btn ghost" href="https://github.com/farvisun/topbarac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5"/></svg>View source</a>
+      </div>
+      <p class="fine">MIT licensed · Universal build for Apple silicon and Intel · Swift and SwiftUI</p>
+    </div>
+    <div class="fan">
+      <div class="frame f2"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="" width="641" height="1400" loading="lazy"></picture></div>
+      <div class="frame f3"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="" width="562" height="1400" loading="lazy"></picture></div>
+      <div class="frame f1"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="Topbarac CPU popover showing 79% usage, a one-minute chart with P-core and E-core lines, per-core bars and the top CPU processes" width="635" height="1400" fetchpriority="high"></picture></div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <ul class="stats" aria-label="At a glance">
+      <li class="glass"><b class="grad">7</b><span>widgets</span></li>
+      <li class="glass"><b class="grad">5</b><span>panel styles</span></li>
+      <li class="glass"><b class="grad">1 s</b><span>refresh, adjustable to 5 s</span></li>
+      <li class="glass"><b class="grad">0</b><span>accounts, telemetry or helper daemons</span></li>
+    </ul>
+  </div>
+
+  <section id="widgets" aria-labelledby="widgets-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Widgets</span>
+        <h2 id="widgets-h">Seven widgets, each in its own menu bar item.</h2>
+        <p>Turn on the ones you want. Or combine them all into a single menu bar item with a tabbed popover.</p>
+      </div>
+
+      <article class="widget" id="cpu" aria-labelledby="cpu-h">
+        <div class="txt">
+          <span class="label grad">CPU</span>
+          <h3 id="cpu-h">Every core, Performance and Efficiency.</h3>
+          <p class="tag">Total usage, and exactly where it goes.</p>
+          <ul class="dots">
+            <li>Total usage and a bar per core, split into Performance and Efficiency cores</li>
+            <li>Busiest core at a glance</li>
+            <li>P and E cluster frequency</li>
+            <li>Load average for 1, 5 and 15 minutes, and uptime</li>
+            <li>One-minute chart with separate P and E lines</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="CPU popover: usage, frequency and load tiles, a chart of total, P-core and E-core usage, per-core bars, load average, uptime and top CPU processes" width="635" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget flip" id="memory" aria-labelledby="memory-h">
+        <div class="txt">
+          <span class="label grad">Memory</span>
+          <h3 id="memory-h">Counted the way Activity Monitor counts it.</h3>
+          <p class="tag">Used versus installed, without the guesswork.</p>
+          <ul class="dots">
+            <li>Used memory as app + wired + compressed, against installed memory</li>
+            <li>Cached files, swap and memory pressure</li>
+            <li>Stacked breakdown bar</li>
+            <li>“Free inactive memory” runs <code>purge</code> after an administrator prompt</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="Memory popover: used and installed memory, a stacked breakdown bar, cached files, swap, memory pressure and top memory processes" width="641" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget" id="disk" aria-labelledby="disk-h">
+        <div class="txt">
+          <span class="label grad">Disk</span>
+          <h3 id="disk-h">Every volume, every byte per second.</h3>
+          <p class="tag">Space, speed and the clutter you can clear yourself.</p>
+          <ul class="dots">
+            <li>Every real volume with free and purgeable space; eject or open it</li>
+            <li>Read and write speed, busy time of the busiest disk</li>
+            <li>Mirrored read/write chart</li>
+            <li>Trash size with Empty Trash (through Finder, asks first)</li>
+            <li>User caches size with Show in Finder; nothing is ever deleted automatically</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/disk-light.png"><img src="assets/shots/disk-dark.png" alt="Disk popover: volumes with free space, read and write speed, a mirrored read/write chart, Trash and caches sizes" width="599" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget flip" id="temperature" aria-labelledby="temperature-h">
+        <div class="txt">
+          <span class="label grad">Temperature</span>
+          <h3 id="temperature-h">Every sensor, grouped.</h3>
+          <p class="tag">Heat and fans, read-only on purpose.</p>
+          <ul class="dots">
+            <li>All sensors grouped into CPU dies, GPU, SSD, battery and SoC</li>
+            <li>Session minimum and maximum for each</li>
+            <li>Fan speeds in RPM with their min/max range; Topbarac never controls fans</li>
+            <li>Thermal state</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="Temperature popover: sensors grouped by CPU, GPU, SSD, battery and SoC with minimum and maximum, fan speeds and thermal state" width="562" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget" id="gpu" aria-labelledby="gpu-h">
+        <div class="txt">
+          <span class="label grad">GPU</span>
+          <h3 id="gpu-h">What the graphics side is doing.</h3>
+          <p class="tag">Utilization down to the engines.</p>
+          <ul class="dots">
+            <li>GPU utilization</li>
+            <li>Renderer and tiler engines</li>
+            <li>GPU memory in use</li>
+            <li>Frequency and power, when available</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/gpu-light.png"><img src="assets/shots/gpu-dark.png" alt="GPU popover: utilization, renderer and tiler engines, memory in use, frequency and power" width="611" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget flip" id="network" aria-labelledby="network-h">
+        <div class="txt">
+          <span class="label grad">Network</span>
+          <h3 id="network-h">Live traffic, and who is using it.</h3>
+          <p class="tag">Download and upload, per interface and per app.</p>
+          <ul class="dots">
+            <li>Live download and upload speed</li>
+            <li>Totals for this session</li>
+            <li>Per-interface rates; VPN tunnels are shown but not counted twice</li>
+            <li>Top apps using the network</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame wide"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/network-light.png"><img src="assets/shots/network-dark.png" alt="Network popover: download and upload speed, session total, a mirrored traffic chart, interfaces and top network apps" width="1002" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+
+      <article class="widget" id="battery" aria-labelledby="battery-h">
+        <div class="txt">
+          <span class="label grad">Battery</span>
+          <h3 id="battery-h">Charge, health and watts.</h3>
+          <p class="tag">Where the power is going, and how much is left.</p>
+          <ul class="dots">
+            <li>Charge level and time to full or empty</li>
+            <li>Watts in and out</li>
+            <li>Maximum capacity (health) and cycle count</li>
+            <li>Voltage and adapter wattage</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/battery-light.png"><img src="assets/shots/battery-dark.png" alt="Battery popover: charge, power in and out, time remaining, maximum capacity, cycle count, voltage and adapter wattage" width="656" height="1400" loading="lazy"></picture></div>
+        </figure>
+      </article>
+    </div>
+  </section>
+
+  <section id="styles" aria-labelledby="styles-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Panel styles</span>
+        <h2 id="styles-h">Five ways to fit your menu bar.</h2>
+        <p>Numbers, Sparkline, Bars, Ring or Level meter. Pick the one that reads best for you.</p>
+      </div>
+      <figure class="styles-shot">
+        <picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/styles-light.png"><img src="assets/shots/styles-dark.png" alt="The five panel styles side by side: Numbers, Sparkline, Bars, Ring and Level meter, each showing CPU, memory, temperature, GPU and battery" width="1400" height="408" loading="lazy"></picture>
+      </figure>
+      <div class="grid two">
+        <div class="card glass">
+          <h3>Steady, readable values</h3>
+          <ul class="dots">
+            <li>Show or hide the value and the label for each widget</li>
+            <li>Fixed-width numbers, so the menu bar never jitters</li>
+            <li>Celsius or Fahrenheit, bytes or bits</li>
+          </ul>
+        </div>
+        <div class="card glass">
+          <h3>Colour that means something</h3>
+          <p>Values turn yellow, then red, once they pass each widget’s warning and critical thresholds. For battery the scale is inverted, so a low charge is the one that turns red.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="manage" aria-labelledby="manage-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Manage</span>
+        <h2 id="manage-h">See what is busy. Stop it.</h2>
+        <p>Every popover lists the top processes for its metric: CPU, memory, disk, network or energy.</p>
+      </div>
+      <div class="grid">
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg></div>
+          <h3>Grouped by app</h3>
+          <p>Helper processes fold into the app they belong to, so you see “Chrome ×28”, not twenty-eight rows.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg></div>
+          <h3>Quit in place</h3>
+          <p>Hover a row to Quit. Right-click for Force Quit or Kill with an inline confirmation, Show in Finder, or Copy PID.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+          <h3>Other users’ processes</h3>
+          <p>Processes owned by root or another user can be stopped after an administrator prompt.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg></div>
+          <h3>System stays safe</h3>
+          <p>System processes such as WindowServer, Dock, Finder, launchd and kernel_task are protected.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></div>
+          <h3>All Processes window</h3>
+          <p>A full window of every process, with search and sort.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" aria-labelledby="features-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Features</span>
+        <h2 id="features-h">Built to watch quietly.</h2>
+        <p>Native Swift and SwiftUI, Liquid Glass popovers, and updates that arrive on their own through Sparkle.</p>
+      </div>
+      <div class="grid two">
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></div>
+          <h3>Alerts</h3>
+          <p>Rules like “CPU above 90% for 60 s”, “memory pressure critical”, “less than 10 GB free”, “hotter than 95 °C” or “battery below 15%”, each with a duration and a cooldown.</p>
+          <p>The notification names the process to blame and has a Quit button. The menu bar item can flash while an alert is active.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg></div>
+          <h3>History</h3>
+          <p>Charts show 1 min, 10 min or 1 h from memory. Optional on-disk history (off by default) keeps data in SQLite on your Mac only: 10 s averages for 7 days, 1 min for 90 days, 10 min after that.</p>
+          <p>Browse 24 h, 7 d, 30 d or All. Export to CSV, or clear it.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M3 14l4-5 4 6 4-8 6 9"/></svg></div>
+          <h3>Charts you can read</h3>
+          <p>Hover, or use the arrow keys, to read any sample. The chart holds still while you look. Sleep and wake leave a gap instead of a fake spike.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 21a8 8 0 0 1-1-15.9C14 4 19 3 20 3c0 1-1 6-2 10a8 8 0 0 1-7 8z"/><path d="M4 21c4-5 7-8 11-11"/></svg></div>
+          <h3>Light footprint</h3>
+          <ul class="dots">
+            <li>One timer drives all widgets</li>
+            <li>Only enabled widgets are measured</li>
+            <li>Details and process lists only while a popover is open</li>
+            <li>Frequency and power only when shown</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy" aria-labelledby="privacy-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Privacy</span>
+        <h2 id="privacy-h">Your Mac’s numbers stay on your Mac.</h2>
+      </div>
+      <div class="grid">
+        <div class="card glass">
+          <h3>Nothing to sign up for</h3>
+          <p>No accounts and no analytics. The only network request is a daily update check (Sparkle, against GitHub releases).</p>
+        </div>
+        <div class="card glass">
+          <h3>Nothing extra installed</h3>
+          <p>No root, no helper daemon, no kernel extension. It reads system counters and sensors, read-only.</p>
+        </div>
+        <div class="card glass">
+          <h3>Asks only when it must</h3>
+          <p>The administrator password is requested only to free memory or stop another user’s process. History is stored only if you turn it on, in <code>~/Library/Application&nbsp;Support/Topbarac</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Install</span>
+        <h2 id="install-h">Up and running in a minute.</h2>
+        <p>Requires macOS 26 or later. Universal build for Apple silicon and Intel.</p>
+      </div>
+      <div class="grid">
+        <div class="card glass">
+          <h3>Homebrew</h3>
+          <p>The quickest way.</p>
+          <div class="cmd"><pre><code>brew install --cask farvisun/tap/topbarac</code></pre></div>
+        </div>
+        <div class="card glass">
+          <h3>Download</h3>
+          <ol class="steps">
+            <li>Get the DMG from the <a href="https://github.com/farvisun/topbarac/releases/latest">latest release</a>.</li>
+            <li>Drag Topbarac to Applications.</li>
+            <li>The app is not notarized yet, so the first time right-click it and choose Open, or run:</li>
+          </ol>
+          <div class="cmd"><pre><code>xattr -dr com.apple.quarantine /Applications/Topbarac.app</code></pre></div>
+        </div>
+        <div class="card glass">
+          <h3>From source</h3>
+          <p>Needs Xcode 26 or later.</p>
+          <div class="cmd"><pre><code>git clone https://github.com/farvisun/topbarac
+cd topbarac
+scripts/build-app.sh release --run</code></pre></div>
+        </div>
+      </div>
+      <p class="note glass">Updates arrive automatically through Sparkle.</p>
+    </div>
+  </section>
+
+  <section id="faq" aria-labelledby="faq-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">FAQ</span>
+        <h2 id="faq-h">Questions, answered.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Why macOS 26?</summary>
+          <p>Topbarac is built on Liquid Glass and the latest SwiftUI, which arrived with macOS 26.</p>
+        </details>
+        <details>
+          <summary>Does it need admin rights?</summary>
+          <p>No. It runs as a normal app. It asks for an administrator password only when you free inactive memory (<code>purge</code>) or stop a process owned by root or another user.</p>
+        </details>
+        <details>
+          <summary>Can it control fans?</summary>
+          <p>No. Fan speeds are read-only on purpose; Topbarac only shows them.</p>
+        </details>
+        <details>
+          <summary>Why does CPU power show “—”?</summary>
+          <p>Some macOS versions hide CPU energy figures from apps that do not run as root. GPU power and the frequencies still show.</p>
+        </details>
+        <details>
+          <summary>How do I move the menu bar items?</summary>
+          <p>Hold <kbd>⌘</kbd> and drag them, like any other menu bar item.</p>
+        </details>
+        <details>
+          <summary>How much CPU does it use?</summary>
+          <p>About 1% per live-updating menu bar item at the 1 s refresh, and most of that is macOS redrawing the menu bar. At 5 s it is close to zero.</p>
+        </details>
+        <details>
+          <summary>Is it related to Topbar Resource?</summary>
+          <p>Yes. <a href="https://farvisun.github.io/topbar-resource/">Topbar Resource</a> is the sister project for GNOME Shell.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p style="margin:0">Topbarac · MIT licensed · Not affiliated with Apple.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/farvisun/topbarac">Source</a>
+      <a href="https://github.com/farvisun/topbarac/issues">Issues</a>
+      <a href="https://github.com/farvisun/topbarac/releases/latest">Releases</a>
+      <a href="https://farvisun.github.io/topbar-resource/">Topbar Resource</a>
+    </nav>
+  </div>
+</footer>
+<p class="sr-only" id="live" aria-live="polite"></p>
+
+<script>
+(function(){
+  var d=document,live=d.getElementById('live');
+  d.documentElement.classList.add('js');
+  d.querySelectorAll('.shot .frame').forEach(function(f){
+    var b=d.createElement('button');
+    b.type='button';b.className='more';b.setAttribute('aria-expanded','false');
+    b.textContent='Show full screenshot';
+    b.addEventListener('click',function(){
+      var o=f.classList.toggle('open');
+      b.setAttribute('aria-expanded',String(o));
+      b.textContent=o?'Show less':'Show full screenshot';
+    });
+    f.parentNode.appendChild(b);
+  });
+  if(!navigator.clipboard)return;
+  d.querySelectorAll('.cmd').forEach(function(c){
+    var b=d.createElement('button'),code=c.querySelector('code');
+    b.type='button';b.className='copy';b.textContent='Copy';
+    b.setAttribute('aria-label','Copy command');
+    b.addEventListener('click',function(){
+      navigator.clipboard.writeText(code.textContent.trim()).then(function(){
+        b.textContent='Copied';live.textContent='Copied to clipboard';
+      },function(){b.textContent='Press ⌘C';});
+      setTimeout(function(){b.textContent='Copy';live.textContent='';},1800);
+    });
+    c.appendChild(b);
+  });
+})();
+</script>
+</body>
+</html>
