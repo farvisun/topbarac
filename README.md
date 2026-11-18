@@ -22,9 +22,21 @@ thresholds that turn it yellow or red.
 | Network | download, upload or both | per-interface rates, session totals, apps using the network |
 | Battery | charge, watts or time left | power in/out chart, health, cycles, voltage, adapter |
 
+An optional **Overview** item (also the first tab of the combined item) shows every widget as a card with a
+sparkline, a health check that names what is slowing the Mac down with a one-click fix (quit the app, free memory,
+analyze storage), what is keeping the Mac awake, and the batteries of Bluetooth accessories. A global shortcut opens it
+from anywhere; inside a popover ⌘1–⌘7 jump between widgets.
+
+Charts mark the warning and critical thresholds and fired alerts, and show low / average / peak for the range. The CPU
+popover can switch its core bars to a per-core heatmap. The Network popover adds Wi‑Fi link details and router and
+internet latency (pinged only while it is open). The Disk popover opens a storage analyzer: the usual space hogs
+(Docker, developer caches, Downloads) and a drill-down of the home folder, read-only.
+
 Every popover lists the top processes for its metric, with helpers folded into their app. Hover to quit; right-click to
 force quit, kill, reveal in Finder or copy the PID. Processes of other users can be stopped after an administrator
-prompt; system processes are protected. "Show All" opens a searchable process window.
+prompt; system processes are protected. "Show All" opens a searchable, sortable process table with
+a CPU sparkline per app and helpers expandable under their app; with History on it also shows which apps used the most
+CPU time and energy today, this week or this month.
 
 Alerts fire when a rule holds for a duration ("CPU above 90 % for 60 s") and name the process to blame, with a Quit
 button in the notification. Charts show 1 min / 10 min / 1 h from memory; turn on History to keep averages on disk

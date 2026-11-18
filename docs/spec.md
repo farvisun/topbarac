@@ -26,6 +26,11 @@ macOS port of the GNOME extension Topbar Resource, with management tools on top.
 | Network | `sysctl(NET_RT_IFLIST2)` 64-bit counters | VPN/tunnel interfaces are listed but not added to totals. |
 | Battery | IOPowerSources, `AppleSmartBattery` | Amperage is unsigned in the registry; reinterpret the bits. SystemLoad (mW) gives system power. |
 | Processes | `proc_pid_rusage` (own processes), `/bin/ps` (setuid, other users), `responsibility_get_pid_responsible_for_pid` | Helpers fold into the responsible app. |
+| Sleep blockers | `IOPMCopyAssertionsByProcess` | Only assertion types that block system or display sleep. |
+| Wi‑Fi | CoreWLAN | SSID needs Location permission and is usually nil; not requested. |
+| Latency | ICMP echo over `SOCK_DGRAM`/`IPPROTO_ICMP` (no root) | Every datagram ICMP socket sees every reply: match identifier and sequence. Some routers never answer. |
+| Bluetooth batteries | IORegistry `BatteryPercent`, `system_profiler SPBluetoothDataType -json` | system_profiler is slow; read at most once a minute. |
+| App usage history | process samples every 30 s while History is on | Hourly buckets of CPU seconds and energy joules per app in `app_usage`. |
 | Per-app network | `nettop -P -x -L 0 -s 2` run under `script` | nettop takes ~5 s to start and block-buffers into pipes, hence one long-running process on a pty while the Network popover is open. |
 
 ## Performance notes
