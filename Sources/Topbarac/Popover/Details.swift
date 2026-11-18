@@ -12,86 +12,91 @@ struct CPUDetail: View {
     var body: some View {
         let c = store.cpu ?? CPUSnapshot()
         let config = settings.config(.cpu)
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                StatTile(label: "Usage", value: Format.percent(c.usage),
-                         caption: "\(Format.percent(c.user)) usr · \(Format.percent(c.system)) sys",
-                         level: Level.of(c.usage * 100, config: config, inverted: false))
-                StatTile(label: "Frequency", value: c.pFrequencyMHz.map(Format.mhz) ?? "—",
-                         caption: c.eFrequencyMHz.map { "E-cores \(Format.mhz($0))" } ?? "P-cores")
-                if let w = c.powerWatts {
-                    StatTile(label: "Power", value: Format.watts(w), caption: "CPU package")
-                } else {
-                    StatTile(label: "Load", value: String(format: "%.2f", c.load.0), caption: "1-minute average")
-                }
-            }
+        VStack(alignment: .leading, spacing: DS.gap) {
+            StatStrip(stats: [
+                Stat(label: "Usage", value: Format.percent(c.usage),
+                     detail: "\(Format.percent(c.user)) user · \(Format.percent(c.system)) sys",
+                     level: Level.of(c.usage * 100, config: config, inverted: false)),
+                c.powerWatts.map { Stat(label: "Power", value: Format.watts($0), detail: "CPU package") }
+                    ?? Stat(label: "Frequency", value: c.pFrequencyMHz.map(Format.mhz) ?? "—",
+                            detail: c.eFrequencyMHz.map { "E-cores \(Format.mhz($0))" } ?? "P-cores"),
+                Stat(label: "Load", value: String(format: "%.2f", c.load.0),
+                     detail: String(format: "%.2f · %.2f", c.load.1, c.load.2)),
+            ])
             Card {
+                // User and system stacked: the height is total usage, the split shows who is using it.
                 LiveChart(spec: ChartSpec(series: [
-                    ChartSeries(key: .cpuUsage, label: "Total", color: WidgetKind.cpu.accent),
-                    ChartSeries(key: .cpuP, label: "P-cores", color: .orange, area: false),
-                    ChartSeries(key: .cpuE, label: "E-cores", color: .teal, area: false),
-                ].filter { $0.key == .cpuUsage || c.pClusterUsage != nil }, domain: 0...1, format: percentAxis))
+                    ChartSeries(key: .cpuUser, label: "User", color: WidgetKind.cpu.accent),
+                    ChartSeries(key: .cpuSystem, label: "System", color: Color(red: 0.98, green: 0.36, blue: 0.42)),
+                ], domain: 0...1, stacked: true, format: percentAxis))
             }
             Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle("Cores", trailing: c.busiestCore.map { "Busiest: core \($0.index + 1) at \(Format.percent($0.usage))" })
-                    CoreGrid(cores: c.perCore, kinds: c.coreKinds, config: config)
-                    Divider().opacity(0.5)
-                    HStack {
-                        InfoRow(label: "Load", value: String(format: "%.2f  %.2f  %.2f", c.load.0, c.load.1, c.load.2), symbol: "gauge.medium")
-                    }
-                    InfoRow(label: "Uptime", value: Format.duration(c.uptime), symbol: "clock")
+                VStack(alignment: .leading, spacing: 7) {
+                    SectionTitle("Cores", trailing: c.busiestCore.map { "Busiest #\($0.index + 1) · \(Format.percent($0.usage)) · up \(Format.duration(c.uptime))" })
+                    CoreGrid(snapshot: c, config: config)
                 }
             }
         }
     }
 }
 
-/// One small vertical bar per logical core, P-cores and E-cores in separate groups.
+/// P and E clusters side by side, one slim bar per core, cluster average above each group.
 struct CoreGrid: View {
-    var cores: [Double]
-    var kinds: [CoreKind]
+    var snapshot: CPUSnapshot
     var config: WidgetConfig
 
     var body: some View {
-        let groups: [(String, [(Int, Double)])] = {
-            let indexed = Array(cores.enumerated())
-            let p = indexed.filter { kinds.indices.contains($0.offset) && kinds[$0.offset] == .performance }.map { ($0.offset, $0.element) }
-            let e = indexed.filter { kinds.indices.contains($0.offset) && kinds[$0.offset] == .efficiency }.map { ($0.offset, $0.element) }
-            if p.isEmpty && e.isEmpty { return [("Cores", indexed.map { ($0.offset, $0.element) })] }
-            return [("Performance", p), ("Efficiency", e)].filter { !$0.1.isEmpty }
-        }()
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(groups, id: \.0) { name, list in
-                HStack(alignment: .bottom, spacing: 10) {
-                    Text(name == "Performance" ? "P" : (name == "Efficiency" ? "E" : ""))
-                        .font(.system(size: 10, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
-                        .frame(width: 10)
-                        .help(name + " cores")
-                    HStack(alignment: .bottom, spacing: 4) {
-                        ForEach(list, id: \.0) { index, usage in
-                            let level = Level.of(usage * 100, config: config, inverted: false)
-                            VStack(spacing: 3) {
-                                ZStack(alignment: .bottom) {
-                                    RoundedRectangle(cornerRadius: 3).fill(.primary.opacity(0.07))
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(level == .normal ? AnyShapeStyle(WidgetKind.cpu.accent.gradient) : AnyShapeStyle(level.color.gradient))
-                                        .frame(height: max(2, 34 * usage))
-                                }
-                                .frame(height: 34)
-                                Text("\(index + 1)").font(.system(size: 8.5)).foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: 24)
-                            .help("Core \(index + 1): \(Format.percent(usage))")
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Core \(index + 1)")
-                            .accessibilityValue(Format.percent(usage))
+        let indexed = Array(snapshot.perCore.enumerated())
+        let kinds = snapshot.coreKinds
+        let p = indexed.filter { kinds.indices.contains($0.offset) && kinds[$0.offset] == .performance }
+        let e = indexed.filter { kinds.indices.contains($0.offset) && kinds[$0.offset] == .efficiency }
+        let groups: [(String, String?, [(offset: Int, element: Double)])] = (p.isEmpty && e.isEmpty)
+            ? [("Cores", nil, indexed)]
+            : [("Performance", snapshot.pClusterUsage.map { Format.percent($0) }, p), ("Efficiency", snapshot.eClusterUsage.map { Format.percent($0) }, e)].filter { !$0.2.isEmpty }
+        // Each cluster gets width in proportion to its core count, so every bar is the same width.
+        let total = CGFloat(max(1, groups.reduce(0) { $0 + $1.2.count }))
+        let spacing: CGFloat = 12
+        let available = Metrics.popoverWidth - 2 * DS.pad - 2 * DS.inner - spacing * CGFloat(groups.count - 1)
+        HStack(alignment: .top, spacing: spacing) {
+            ForEach(groups, id: \.0) { name, average, cores in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Text(name).font(DS.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 2)
+                        if let average { Text(average).font(DS.value) }
+                    }
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach(cores, id: \.offset) { core in
+                            CoreBar(index: core.offset, usage: core.element, level: Level.of(core.element * 100, config: config, inverted: false))
                         }
                     }
+                    .frame(height: 26)
                 }
+                .frame(width: floor(available * CGFloat(cores.count) / total))
             }
         }
-        .animation(.smooth(duration: 0.3), value: cores)
+        .animation(.smooth(duration: 0.3), value: snapshot.perCore)
+    }
+}
+
+private struct CoreBar: View {
+    var index: Int
+    var usage: Double
+    var level: Level
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 2).fill(.primary.opacity(0.07))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(level == .normal ? WidgetKind.cpu.accent : level.color)
+                    .frame(height: max(2, geo.size.height * usage))
+            }
+        }
+        .help("Core \(index + 1): \(Format.percent(usage))")
+        .accessibilityElement()
+        .accessibilityLabel("Core \(index + 1)")
+        .accessibilityValue(Format.percent(usage))
     }
 }
 
@@ -104,71 +109,45 @@ struct MemoryDetail: View {
     @State private var purging = false
     @State private var confirmPurge = false
 
+    private static let app = WidgetKind.memory.accent
+    private static let wired = Color(red: 1.0, green: 0.62, blue: 0.25)
+    private static let compressed = Color(red: 0.95, green: 0.38, blue: 0.55)
+    private static let cached = Color(red: 0.25, green: 0.72, blue: 0.75)
+
     var body: some View {
         let m = store.memory ?? MemorySnapshot()
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                StatTile(label: "Used", value: Format.memory(m.used), caption: "of \(Format.memory(m.total))",
-                         level: Level.of(m.usage * 100, config: settings.config(.memory), inverted: false))
-                StatTile(label: "Cached files", value: Format.memory(m.cached), caption: "Reclaimable")
-                StatTile(label: "Swap", value: Format.memory(m.swapUsed),
-                         caption: m.swapTotal > 0 ? "of \(Format.memory(m.swapTotal))" : "Not in use",
-                         level: m.swapUsed > m.total / 4 ? .warning : .normal)
+        VStack(alignment: .leading, spacing: DS.gap) {
+            StatStrip(stats: [
+                Stat(label: "Used", value: Format.memory(m.used), detail: "\(Format.percent(m.usage)) of \(Format.memory(m.total))",
+                     level: Level.of(m.usage * 100, config: settings.config(.memory), inverted: false)),
+                Stat(label: "Cached", value: Format.memory(m.cached), detail: "reclaimable"),
+                Stat(label: "Swap", value: Format.memory(m.swapUsed), detail: m.swapTotal > 0 ? "of \(Format.memory(m.swapTotal))" : "not in use",
+                     level: m.swapUsed > m.total / 4 ? .warning : .normal),
+            ])
+            Card {
+                // What fills memory over time, not just how much.
+                LiveChart(spec: ChartSpec(series: [
+                    ChartSeries(key: .memApp, label: "App", color: Self.app),
+                    ChartSeries(key: .memWired, label: "Wired", color: Self.wired),
+                    ChartSeries(key: .memCompressed, label: "Compr.", color: Self.compressed),
+                ], domain: 0...1, stacked: true, format: percentAxis))
             }
             Card {
-                LiveChart(spec: ChartSpec(series: [ChartSeries(key: .memUsage, label: "Used", color: WidgetKind.memory.accent)],
-                                          domain: 0...1, format: percentAxis))
-            }
-            Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle("Breakdown", trailing: Format.percent(m.usage) + " used")
-                    let parts = [
-                        StackedBar.Part(label: "App", value: Double(m.app), color: WidgetKind.memory.accent),
-                        StackedBar.Part(label: "Wired", value: Double(m.wired), color: .orange),
-                        StackedBar.Part(label: "Compressed", value: Double(m.compressed), color: .pink),
-                        StackedBar.Part(label: "Cached", value: Double(m.cached), color: .teal.opacity(0.7)),
-                    ]
-                    StackedBar(parts: parts, total: Double(m.total))
-                    Grid(horizontalSpacing: 16, verticalSpacing: 5) {
-                        GridRow {
-                            LegendDot(color: parts[0].color, label: "App", value: Format.memory(m.app))
-                            LegendDot(color: parts[1].color, label: "Wired", value: Format.memory(m.wired))
-                        }
-                        GridRow {
-                            LegendDot(color: parts[2].color, label: "Compressed", value: Format.memory(m.compressed))
-                            LegendDot(color: parts[3].color, label: "Cached", value: Format.memory(m.cached))
-                        }
-                        GridRow {
-                            LegendDot(color: .primary.opacity(0.15), label: "Free", value: Format.memory(m.free))
-                            LegendDot(color: m.pressure == .normal ? .green : (m.pressure == .warning ? .yellow : .red),
-                                      label: "Pressure", value: m.pressure.title)
-                        }
+                VStack(alignment: .leading, spacing: 7) {
+                    SectionTitle("Breakdown") {
+                        Button(purging ? "Freeing…" : "Free Inactive…") { confirmPurge = true }
+                            .buttonStyle(.borderless).font(.system(size: 10.5, weight: .medium)).disabled(purging || confirmPurge)
+                            .help("Runs purge after an administrator prompt")
                     }
-                }
-            }
-            Card {
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionTitle("Tools")
+                    StackedBar(parts: [
+                        .init(label: "App", value: Double(m.app), color: Self.app, text: Format.memory(m.app)),
+                        .init(label: "Wired", value: Double(m.wired), color: Self.wired, text: Format.memory(m.wired)),
+                        .init(label: "Compressed", value: Double(m.compressed), color: Self.compressed, text: Format.memory(m.compressed)),
+                        .init(label: "Cached", value: Double(m.cached), color: Self.cached, text: Format.memory(m.cached)),
+                    ], total: Double(m.total))
                     if confirmPurge {
-                        Text("Free inactive memory runs `purge`. It asks for an administrator password and can make apps briefly slower while caches refill.")
-                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        HStack {
-                            Button("Free Memory") { purge() }.buttonStyle(.glassProminent).tint(WidgetKind.memory.accent)
-                            Button("Cancel") { confirmPurge = false }.buttonStyle(.borderless)
-                        }
-                        .controlSize(.small)
-                    } else {
-                        HStack {
-                            Button {
-                                confirmPurge = true
-                            } label: {
-                                Label(purging ? "Freeing…" : "Free Inactive Memory", systemImage: "wind")
-                            }
-                            .disabled(purging)
-                            Spacer()
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.small)
+                        ConfirmBar(text: "Asks for your password. Apps may feel slower briefly while caches refill.",
+                                   action: "Free Memory", destructive: false, onCancel: { confirmPurge = false }, onConfirm: purge)
                     }
                 }
             }
@@ -186,6 +165,28 @@ struct MemoryDetail: View {
     }
 }
 
+/// Inline confirmation inside a card (popovers close when an alert window appears).
+struct ConfirmBar: View {
+    var text: String
+    var action: String
+    var destructive: Bool
+    var onCancel: () -> Void
+    var onConfirm: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(text).font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button("Cancel", action: onCancel).buttonStyle(.borderless)
+            Button(action, action: onConfirm).buttonStyle(.glassProminent).tint(destructive ? .red : .accentColor)
+        }
+        .controlSize(.small)
+        .padding(7)
+        .background((destructive ? Color.red : Color.accentColor).opacity(0.07), in: .rect(cornerRadius: 7))
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+}
+
 // MARK: Disk
 
 struct DiskDetail: View {
@@ -198,12 +199,12 @@ struct DiskDetail: View {
 
     var body: some View {
         let d = store.disk ?? DiskSnapshot()
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                StatTile(label: "Read", value: Format.rate(d.readBps), tint: WidgetKind.disk.accent)
-                StatTile(label: "Write", value: Format.rate(d.writeBps), tint: WidgetKind.disk.secondaryAccent)
-                StatTile(label: "Busy", value: Format.percent(d.busy), caption: d.busiestDevice)
-            }
+        VStack(alignment: .leading, spacing: DS.gap) {
+            StatStrip(stats: [
+                Stat(label: "Read", value: Format.rate(d.readBps), tint: WidgetKind.disk.accent),
+                Stat(label: "Write", value: Format.rate(d.writeBps), tint: WidgetKind.disk.secondaryAccent),
+                Stat(label: "Busy", value: Format.percent(d.busy), detail: d.busiestDevice),
+            ])
             Card {
                 LiveChart(spec: ChartSpec(series: [
                     ChartSeries(key: .diskRead, label: "Read", color: WidgetKind.disk.accent),
@@ -211,45 +212,31 @@ struct DiskDetail: View {
                 ], domain: nil, format: { Format.rate($0, compact: true) }))
             }
             Card {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     SectionTitle("Volumes", trailing: "\(d.volumes.count)")
                     if d.volumes.isEmpty {
-                        Text("Reading volumes…").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Text("Reading volumes…").font(DS.label).foregroundStyle(.tertiary)
                     }
                     ForEach(d.volumes) { volume in VolumeRow(volume: volume) }
                 }
             }
             Card {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
                     SectionTitle("Clean up")
-                    HStack(spacing: 8) {
-                        Image(systemName: "trash").frame(width: 16).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Trash").font(.system(size: 12, weight: .medium))
-                            Text(sizeText(trashSize, unreadable: "Needs Full Disk Access to measure"))
-                                .font(.system(size: 10.5)).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if confirmEmpty {
-                            Button("Empty") { emptyTrash() }.buttonStyle(.glassProminent).tint(.red)
-                            Button("Cancel") { confirmEmpty = false }.buttonStyle(.borderless)
-                        } else {
-                            Button("Empty Trash…") { confirmEmpty = true }.buttonStyle(.glass).disabled(working)
+                    CleanupRow(symbol: "trash", title: "Trash", detail: sizeText(trashSize, unreadable: "needs Full Disk Access")) {
+                        if !confirmEmpty {
+                            Button("Empty…") { confirmEmpty = true }.disabled(working || (trashSize ?? nil) == 0)
                         }
                     }
-                    HStack(spacing: 8) {
-                        Image(systemName: "archivebox").frame(width: 16).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("User caches").font(.system(size: 12, weight: .medium))
-                            Text(sizeText(cachesSize, unreadable: "Couldn't read")).font(.system(size: 10.5)).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Show in Finder") { SystemActions.reveal(SystemActions.cachesURL) }.buttonStyle(.glass)
+                    if confirmEmpty {
+                        ConfirmBar(text: "Everything in the Trash is deleted for good.", action: "Empty Trash", destructive: true,
+                                   onCancel: { confirmEmpty = false }, onConfirm: emptyTrash)
                     }
-                    Text("Topbarac never deletes caches itself. Remove what you don't need in Finder.")
-                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    CleanupRow(symbol: "archivebox", title: "User caches", detail: sizeText(cachesSize, unreadable: "couldn't read")) {
+                        Button("Show") { SystemActions.reveal(SystemActions.cachesURL) }
+                            .help("Topbarac never deletes caches itself. Remove what you don't need in Finder.")
+                    }
                 }
-                .controlSize(.small)
             }
         }
         .task { await measure() }
@@ -283,41 +270,54 @@ struct DiskDetail: View {
     }
 }
 
+private struct CleanupRow<Accessory: View>: View {
+    var symbol: String
+    var title: String
+    var detail: String
+    @ViewBuilder var accessory: Accessory
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 14)
+            Text(title).font(DS.body)
+            Text(detail).font(DS.label).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+            Spacer(minLength: 4)
+            accessory.buttonStyle(.borderless).font(.system(size: 10.5, weight: .medium))
+        }
+        .frame(height: DS.rowHeight)
+    }
+}
+
 struct VolumeRow: View {
     var volume: VolumeInfo
     @Environment(ToastCenter.self) private var toasts
-    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let tint: Color = volume.usage > 0.95 ? .red : (volume.usage > 0.85 ? .orange : WidgetKind.disk.accent)
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: volume.isInternal ? "internaldrive" : "externaldrive").foregroundStyle(.secondary)
-                Text(volume.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                Spacer()
-                if hovering {
-                    Button { SystemActions.open(volume) } label: { Image(systemName: "folder") }
-                        .help("Open in Finder").accessibilityLabel("Open \(volume.name) in Finder")
-                    if volume.isEjectable {
-                        Button {
-                            Task { toasts.show(await SystemActions.eject(volume), success: "Ejected \(volume.name)") }
-                        } label: { Image(systemName: "eject") }
-                            .help("Eject").accessibilityLabel("Eject \(volume.name)")
-                    }
-                } else {
-                    Text(Format.percent(volume.usage)).font(.system(size: 11, weight: .medium)).monospacedDigit()
+                Image(systemName: volume.isInternal ? "internaldrive" : "externaldrive").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(volume.name).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(Format.bytes(volume.available)) free of \(Format.bytes(volume.total))")
+                    .font(DS.label).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                Button { SystemActions.open(volume) } label: { Image(systemName: "folder") }
+                    .help("Open in Finder").accessibilityLabel("Open \(volume.name) in Finder")
+                if volume.isEjectable {
+                    Button {
+                        Task { toasts.show(await SystemActions.eject(volume), success: "Ejected \(volume.name)") }
+                    } label: { Image(systemName: "eject.fill") }
+                        .help("Eject").accessibilityLabel("Eject \(volume.name)")
                 }
             }
             .buttonStyle(.borderless)
-            MeterBar(fraction: volume.usage, tint: volume.usage > 0.9 ? .red : (volume.usage > 0.8 ? .yellow : WidgetKind.disk.accent))
-            HStack {
-                Text("\(Format.bytes(volume.available)) free of \(Format.bytes(volume.total))")
-                Spacer()
-                if volume.purgeable > 1_000_000_000 { Text("\(Format.bytes(volume.purgeable)) purgeable") }
+            .font(.system(size: 10.5))
+            MeterBar(fraction: volume.usage, tint: tint, height: 5)
+            if volume.purgeable > 1_000_000_000 {
+                Text("\(Format.percent(volume.usage)) used · \(Format.bytes(volume.purgeable)) purgeable")
+                    .font(.system(size: 9.5)).foregroundStyle(.tertiary).monospacedDigit()
             }
-            .font(.system(size: 10.5)).foregroundStyle(.secondary).monospacedDigit()
         }
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
         .contextMenu {
             Button("Open in Finder") { SystemActions.open(volume) }
             if volume.isEjectable {
@@ -339,12 +339,15 @@ struct TemperatureDetail: View {
         let f = settings.settings.temperatureUnit == .fahrenheit
         let config = settings.config(.temperature)
         let fmt: (Double?) -> String = { v in v.map { Format.temperature($0, fahrenheit: f) } ?? "—" }
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                StatTile(label: "CPU", value: fmt(t.cpu), level: Level.of(t.cpu, config: config, inverted: false))
-                StatTile(label: "GPU", value: fmt(t.gpu), level: Level.of(t.gpu, config: config, inverted: false))
-                StatTile(label: t.ssd != nil ? "SSD" : "Battery", value: fmt(t.ssd ?? t.battery))
-            }
+        let fanRPM = t.fans.map(\.rpm).max()
+        VStack(alignment: .leading, spacing: DS.gap) {
+            StatStrip(stats: [
+                Stat(label: "CPU", value: fmt(t.cpu), level: Level.of(t.cpu, config: config, inverted: false)),
+                Stat(label: "GPU", value: fmt(t.gpu), level: Level.of(t.gpu, config: config, inverted: false)),
+                t.ssd != nil ? Stat(label: "SSD", value: fmt(t.ssd)) : Stat(label: "Battery", value: fmt(t.battery)),
+                Stat(label: "Fans", value: fanRPM.map { $0 < 1 ? "Off" : "\(Int($0))" } ?? "—",
+                     detail: fanRPM.map { $0 < 1 ? nil : "rpm" } ?? "none"),
+            ])
             Card {
                 LiveChart(spec: ChartSpec(series: [
                     ChartSeries(key: .tempCPU, label: "CPU", color: WidgetKind.temperature.accent, area: false),
@@ -352,31 +355,19 @@ struct TemperatureDetail: View {
                     ChartSeries(key: .tempSSD, label: "SSD", color: WidgetKind.disk.accent, area: false),
                 ], domain: nil, includesZero: false, format: { Format.temperature($0, fahrenheit: f) }))
             }
-            if !t.fans.isEmpty {
-                Card {
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionTitle("Fans")
-                        ForEach(t.fans) { fan in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Image(systemName: "fan").foregroundStyle(.secondary)
-                                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: fan.rpm > 1)
-                                    Text(t.fans.count > 1 ? (fan.id == 0 ? "Left fan" : "Right fan") : "Fan").font(.system(size: 12))
-                                    Spacer()
-                                    Text(fan.rpm < 1 ? "Off" : "\(Int(fan.rpm)) RPM").font(.system(size: 12, weight: .medium)).monospacedDigit()
-                                }
-                                MeterBar(fraction: fan.fraction, tint: WidgetKind.temperature.accent, height: 5)
-                                Text("Range \(Int(fan.minRPM))–\(Int(fan.maxRPM)) RPM").font(.system(size: 10)).foregroundStyle(.tertiary)
-                            }
-                        }
-                    }
-                }
-            }
             Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle("Sensors", trailing: "click a group for min · now · max")
+                VStack(alignment: .leading, spacing: 4) {
+                    if !t.fans.isEmpty {
+                        SectionTitle("Fans", trailing: "\(Int(t.fans.map(\.minRPM).min() ?? 0))–\(Int(t.fans.map(\.maxRPM).max() ?? 0)) rpm")
+                        ForEach(t.fans) { fan in
+                            MeterRow(label: t.fans.count > 1 ? (fan.id == 0 ? "Left" : "Right") : "Fan", fraction: fan.maxRPM > 0 ? fan.rpm / fan.maxRPM : 0,
+                                     value: fan.rpm < 1 ? "Off" : "\(Int(fan.rpm))", tint: WidgetKind.temperature.accent, labelWidth: 40)
+                        }
+                        Divider().padding(.vertical, 3)
+                    }
+                    SectionTitle("Sensors", trailing: "hottest \(fmt(t.hottest))")
                     if t.sensors.isEmpty {
-                        Text("No sensors found on this Mac.").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Text("No sensors found on this Mac.").font(DS.label).foregroundStyle(.tertiary)
                     }
                     ForEach(SensorGroup.allCases, id: \.self) { group in
                         let list = t.sensors.filter { $0.group == group }
@@ -390,7 +381,7 @@ struct TemperatureDetail: View {
     }
 }
 
-/// One sensor group: a summary row (count, average, hottest) that expands to every sensor.
+/// One sensor group: a summary row (count, average, hottest) that expands to every sensor with min and max.
 struct SensorGroupView: View {
     var group: SensorGroup
     var sensors: [SensorReading]
@@ -401,46 +392,50 @@ struct SensorGroupView: View {
     var body: some View {
         let hottest = sensors.map(\.celsius).max() ?? 0
         let average = sensors.map(\.celsius).reduce(0, +) / Double(max(1, sensors.count))
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 1) {
             Button {
-                withAnimation(.smooth(duration: 0.25)) { expanded.toggle() }
+                withAnimation(.smooth(duration: 0.22)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                    Text(group.rawValue).font(.system(size: 12, weight: .medium))
-                    Text(sensors.count == 1 ? "" : "\(sensors.count) sensors").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 9)
+                        .opacity(sensors.count > 1 ? 1 : 0)
+                    Text(group.rawValue).font(DS.body)
+                    if sensors.count > 1 {
+                        Text("\(sensors.count)").font(.system(size: 9.5, weight: .medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 4).background(.primary.opacity(0.07), in: .capsule)
+                    }
                     Spacer()
                     if sensors.count > 1 {
-                        Text("avg \(format(average))").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("avg \(format(average))").font(DS.label).foregroundStyle(.tertiary).monospacedDigit()
                     }
                     let level = Level.of(hottest, config: config, inverted: false)
-                    Text(format(hottest)).font(.system(size: 12, weight: .semibold))
+                    Text(format(hottest)).font(DS.value)
                         .foregroundStyle(level == .normal ? .primary : level.color)
-                        .frame(width: 38, alignment: .trailing)
+                        .frame(width: 34, alignment: .trailing)
                 }
-                .monospacedDigit()
+                .frame(height: 20)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
+            .disabled(sensors.count < 2)
             .accessibilityLabel("\(group.rawValue), hottest \(format(hottest))")
             .accessibilityHint(expanded ? "Collapse" : "Show every sensor")
             if expanded {
                 ForEach(sensors) { s in
                     let level = Level.of(s.celsius, config: config, inverted: false)
-                    HStack(spacing: 8) {
-                        Text(s.name).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(s.name).foregroundStyle(.secondary).lineLimit(1)
                         Spacer()
-                        Text(format(s.min)).foregroundStyle(.tertiary)
+                        Text("\(format(s.min))–\(format(s.max))").foregroundStyle(.tertiary)
                         Text(format(s.celsius)).fontWeight(.semibold)
                             .foregroundStyle(level == .normal ? .primary : level.color)
-                            .frame(width: 38, alignment: .trailing)
-                        Text(format(s.max)).foregroundStyle(.tertiary)
+                            .frame(width: 34, alignment: .trailing)
                     }
-                    .font(.system(size: 11)).monospacedDigit()
+                    .font(.system(size: 10.5)).monospacedDigit()
+                    .frame(height: 16)
                     .padding(.leading, 15)
                     .accessibilityElement(children: .combine)
-                    .transition(.opacity)
                 }
             }
         }
@@ -456,46 +451,31 @@ struct GPUDetail: View {
     var body: some View {
         let g = store.gpu ?? GPUSnapshot()
         let f = settings.settings.temperatureUnit == .fahrenheit
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DS.gap) {
             if !g.available && store.gpu != nil {
-                Card { Text("No supported GPU found on this Mac.").font(.system(size: 12)).foregroundStyle(.secondary) }
+                Card { Text("No supported GPU found on this Mac.").font(DS.body).foregroundStyle(.secondary) }
             }
-            HStack(spacing: 8) {
-                StatTile(label: "Usage", value: Format.percent(g.utilization),
-                         level: Level.of(g.utilization * 100, config: settings.config(.gpu), inverted: false))
-                StatTile(label: "Frequency", value: g.frequencyMHz.map(Format.mhz) ?? "—")
-                StatTile(label: "Power", value: g.powerWatts.map(Format.watts) ?? "—",
-                         caption: g.temperature.map { Format.temperature($0, fahrenheit: f) })
-            }
+            StatStrip(stats: [
+                Stat(label: "Usage", value: Format.percent(g.utilization),
+                     level: Level.of(g.utilization * 100, config: settings.config(.gpu), inverted: false)),
+                Stat(label: "Frequency", value: g.frequencyMHz.map(Format.mhz) ?? "—"),
+                Stat(label: "Power", value: g.powerWatts.map(Format.watts) ?? "—"),
+                Stat(label: "Temp", value: g.temperature.map { Format.temperature($0, fahrenheit: f) } ?? "—"),
+            ])
             Card {
                 LiveChart(spec: ChartSpec(series: [ChartSeries(key: .gpuUsage, label: "Usage", color: WidgetKind.gpu.accent)],
                                           domain: 0...1, format: percentAxis))
             }
             Card {
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionTitle("Engines")
-                    engine("Renderer", g.renderer)
-                    engine("Tiler", g.tiler)
-                    Divider().opacity(0.5)
-                    SectionTitle("Memory", trailing: g.memoryAllocated > 0 ? "\(Format.memory(g.memoryUsed)) in use" : nil)
-                    MeterBar(fraction: g.memoryAllocated > 0 ? Double(g.memoryUsed) / Double(g.memoryAllocated) : 0, tint: WidgetKind.gpu.accent)
-                    InfoRow(label: "In use", value: Format.memory(g.memoryUsed))
-                    InfoRow(label: "Allocated", value: Format.memory(g.memoryAllocated))
-                    Text("Apple GPUs share system memory; this is what the GPU has mapped right now.")
-                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionTitle("Engines and memory")
+                    MeterRow(label: "Renderer", fraction: g.renderer, value: Format.percent(g.renderer), tint: WidgetKind.gpu.accent)
+                    MeterRow(label: "Tiler", fraction: g.tiler, value: Format.percent(g.tiler), tint: WidgetKind.gpu.accent)
+                    MeterRow(label: "Memory", fraction: g.memoryAllocated > 0 ? Double(g.memoryUsed) / Double(g.memoryAllocated) : 0,
+                             value: Format.memory(g.memoryUsed), tint: WidgetKind.gpu.secondaryAccent)
+                        .help("In use of \(Format.memory(g.memoryAllocated)) mapped. Apple GPUs share system memory.")
                 }
             }
-        }
-    }
-
-    private func engine(_ name: String, _ value: Double) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(name).font(.system(size: 12)).foregroundStyle(.secondary)
-                Spacer()
-                Text(Format.percent(value)).font(.system(size: 12, weight: .medium)).monospacedDigit()
-            }
-            MeterBar(fraction: value, tint: WidgetKind.gpu.accent, height: 5)
         }
     }
 }
@@ -509,40 +489,39 @@ struct NetworkDetail: View {
     var body: some View {
         let n = store.network ?? NetworkSnapshot()
         let bits = settings.settings.networkUnit == .bits
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                StatTile(label: "Download", value: Format.rate(n.downBps, bits: bits), tint: WidgetKind.network.accent)
-                StatTile(label: "Upload", value: Format.rate(n.upBps, bits: bits), tint: WidgetKind.network.secondaryAccent)
-                StatTile(label: "This session", value: Format.bytes(n.sessionIn + n.sessionOut),
-                         caption: "↓\(Format.bytes(n.sessionIn)) ↑\(Format.bytes(n.sessionOut))")
-            }
+        VStack(alignment: .leading, spacing: DS.gap) {
+            StatStrip(stats: [
+                Stat(label: "Download", value: Format.rate(n.downBps, bits: bits), tint: WidgetKind.network.accent),
+                Stat(label: "Upload", value: Format.rate(n.upBps, bits: bits), tint: WidgetKind.network.secondaryAccent),
+                Stat(label: "Session", value: Format.bytes(n.sessionIn + n.sessionOut),
+                     detail: "↓\(Format.bytes(n.sessionIn)) ↑\(Format.bytes(n.sessionOut))"),
+            ])
             Card {
                 LiveChart(spec: ChartSpec(series: [
-                    ChartSeries(key: .netDown, label: "Download", color: WidgetKind.network.accent),
-                    ChartSeries(key: .netUp, label: "Upload", color: WidgetKind.network.secondaryAccent, mirrored: true),
+                    ChartSeries(key: .netDown, label: "Down", color: WidgetKind.network.accent),
+                    ChartSeries(key: .netUp, label: "Up", color: WidgetKind.network.secondaryAccent, mirrored: true),
                 ], domain: nil, format: { Format.rate($0, bits: bits, compact: true) }))
             }
             Card {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
                     SectionTitle("Interfaces")
                     if n.interfaces.isEmpty {
-                        Text("No traffic yet.").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Text("No traffic yet.").font(DS.label).foregroundStyle(.tertiary)
                     }
-                    ForEach(n.interfaces.prefix(6)) { i in
-                        HStack(spacing: 8) {
-                            Image(systemName: icon(i)).foregroundStyle(.secondary).frame(width: 16)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(i.displayName).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                Text("\(i.bsdName)\(i.isVirtual ? " · not counted in total" : "") · ↓ \(Format.bytes(i.sessionIn)) ↑ \(Format.bytes(i.sessionOut))")
-                                    .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("↓ " + Format.rate(i.downBps, bits: bits))
-                                Text("↑ " + Format.rate(i.upBps, bits: bits)).foregroundStyle(.secondary)
-                            }
-                            .font(.system(size: 10.5, weight: .medium)).monospacedDigit()
+                    ForEach(n.interfaces.prefix(5)) { i in
+                        HStack(spacing: 6) {
+                            Image(systemName: icon(i)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 14)
+                            Text(i.displayName).font(DS.body).lineLimit(1)
+                            Text(i.bsdName).font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                            Spacer(minLength: 4)
+                            Text("↓" + Format.rate(i.downBps, bits: bits, compact: true)).frame(minWidth: 52, alignment: .trailing)
+                            Text("↑" + Format.rate(i.upBps, bits: bits, compact: true)).foregroundStyle(.secondary).frame(minWidth: 52, alignment: .trailing)
                         }
+                        .font(.system(size: 10.5, weight: .medium)).monospacedDigit()
+                        .frame(height: DS.rowHeight - 2)
+                        .opacity(i.isVirtual ? 0.75 : 1)
+                        .help(i.isVirtual ? "Tunnel: its traffic also crosses a physical link, so it isn't added to the total."
+                              : "Session ↓\(Format.bytes(i.sessionIn)) ↑\(Format.bytes(i.sessionOut))")
                         .accessibilityElement(children: .combine)
                     }
                 }
@@ -569,42 +548,39 @@ struct BatteryDetail: View {
     var body: some View {
         let b = store.battery ?? BatterySnapshot()
         let f = settings.settings.temperatureUnit == .fahrenheit
-        VStack(alignment: .leading, spacing: 14) {
+        let minutes = b.charging ? b.minutesToFull : b.minutesToEmpty
+        VStack(alignment: .leading, spacing: DS.gap) {
             if !b.present && store.battery != nil {
-                Card { Text("This Mac has no battery.").font(.system(size: 12)).foregroundStyle(.secondary) }
+                Card { Text("This Mac has no battery.").font(DS.body).foregroundStyle(.secondary) }
             }
-            HStack(spacing: 8) {
-                StatTile(label: "Charge", value: Format.percent(b.percent),
-                         level: b.onAC ? .normal : Level.of(b.percent * 100, config: settings.config(.battery), inverted: true))
-                StatTile(label: b.charging ? "Charging at" : "Draining at",
-                         value: b.batteryWatts.map { Format.watts(abs($0)) } ?? "—",
-                         caption: b.systemPowerWatts.map { "System \(Format.watts($0))" })
-                StatTile(label: b.charging ? "Until full" : "Remaining",
-                         value: (b.charging ? b.minutesToFull : b.minutesToEmpty).map(Format.minutes) ?? (b.onAC ? "On AC" : "Estimating"))
+            StatStrip(stats: [
+                Stat(label: "Charge", value: Format.percent(b.percent), detail: b.charging ? "charging" : (b.onAC ? "on adapter" : "on battery"),
+                     level: b.onAC ? .normal : Level.of(b.percent * 100, config: settings.config(.battery), inverted: true)),
+                Stat(label: (b.batteryWatts ?? 0) >= 0 ? "Into battery" : "Out of battery", value: b.batteryWatts.map { Format.watts(abs($0)) } ?? "—",
+                     detail: b.systemPowerWatts.map { "system \(Format.watts($0))" }),
+                Stat(label: b.charging ? "Until full" : "Remaining", value: minutes.map(Format.minutes) ?? "—",
+                     detail: minutes == nil ? (b.onAC ? "on AC" : "estimating") : "h:mm"),
+            ])
+            Card {
+                // Charge barely moves in a minute; power in (above zero) and out (below) is what changes.
+                LiveChart(spec: ChartSpec(series: [ChartSeries(key: .batteryWatts, label: "Power", color: WidgetKind.battery.accent)],
+                                          domain: nil, format: { String(format: "%.0f W", $0) }))
             }
             Card {
-                LiveChart(spec: ChartSpec(series: [ChartSeries(key: .battery, label: "Charge", color: WidgetKind.battery.accent)],
-                                          domain: 0...1, format: percentAxis))
-            }
-            Card {
-                VStack(alignment: .leading, spacing: 7) {
-                    SectionTitle("Health")
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionTitle("Health", trailing: b.condition ?? "Normal")
                     if let h = b.health {
-                        HStack {
-                            Text("Maximum capacity").font(.system(size: 12)).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(Format.percent(h)).font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                        }
-                        MeterBar(fraction: min(1, h), tint: h < 0.8 ? .orange : WidgetKind.battery.accent)
+                        MeterRow(label: "Capacity", fraction: min(1, h), value: Format.percent(h),
+                                 tint: h < 0.8 ? .orange : WidgetKind.battery.accent, labelWidth: 58)
                     }
-                    InfoRow(label: "Condition", value: b.condition ?? "Normal", symbol: "heart")
-                    if let c = b.cycleCount { InfoRow(label: "Cycle count", value: "\(c)", symbol: "arrow.triangle.2.circlepath") }
-                    if let max = b.maxCapacity, let design = b.designCapacity {
-                        InfoRow(label: "Capacity", value: "\(max) of \(design) mAh", symbol: "battery.100percent")
-                    }
-                    if let v = b.voltage { InfoRow(label: "Voltage", value: String(format: "%.2f V", v), symbol: "bolt") }
-                    if let t = b.temperature { InfoRow(label: "Temperature", value: Format.temperature(t, fahrenheit: f, decimals: 1), symbol: "thermometer.medium") }
-                    if let a = b.adapterWatts { InfoRow(label: "Power adapter", value: "\(Int(a)) W", symbol: "powerplug") }
+                    InfoGrid(items: [
+                        ("Cycles", b.cycleCount.map(String.init)),
+                        ("Max", b.maxCapacity.map { "\($0) mAh" }),
+                        ("Design", b.designCapacity.map { "\($0) mAh" }),
+                        ("Voltage", b.voltage.map { String(format: "%.2f V", $0) }),
+                        ("Temp", b.temperature.map { Format.temperature($0, fahrenheit: f, decimals: 1) }),
+                        ("Adapter", b.adapterWatts.map { "\(Int($0)) W" }),
+                    ].compactMap { label, value in value.map { (label, $0) } })
                 }
             }
         }

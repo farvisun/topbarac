@@ -25,7 +25,7 @@ enum Snapshotter {
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", NSAppearance.Name.aqua)] {
             let ap = NSAppearance(named: appearance)!
             for kind in WidgetKind.allCases {
-                capture(PopoverChrome { WidgetContent(kind: kind).padding(16) }, appearance: ap,
+                capture(PopoverChrome { WidgetContent(kind: kind).padding(DS.pad) }, appearance: ap,
                         to: dir.appendingPathComponent("\(kind.rawValue)-\(name).png"))
             }
             capture(StylesSheet(), appearance: ap, to: dir.appendingPathComponent("styles-\(name).png"))

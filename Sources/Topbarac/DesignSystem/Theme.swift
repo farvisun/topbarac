@@ -57,7 +57,7 @@ extension WidgetKind {
 }
 
 enum Metrics {
-    static let popoverWidth: CGFloat = 380
+    static let popoverWidth: CGFloat = 340
     static let corner: CGFloat = 14
     static let tileCorner: CGFloat = 12
 }

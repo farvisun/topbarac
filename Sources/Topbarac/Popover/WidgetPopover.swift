@@ -1,7 +1,7 @@
 import SwiftUI
 import TopbaracCore
 
-/// Popover for one widget: header, stat tiles, chart, details, management tools, top processes, footer.
+/// Popover for one widget: compact header with actions, key figures, chart, details, processes.
 struct WidgetPopover: View {
     var kind: WidgetKind
     @State private var toasts = ToastCenter()
@@ -9,28 +9,21 @@ struct WidgetPopover: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView(.vertical) {
-                WidgetContent(kind: kind)
-                    .padding(16)
+                WidgetContent(kind: kind).padding(DS.pad)
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.never)
-            .frame(maxHeight: maxHeight)
+            .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 900) - 60)
             .fixedSize(horizontal: false, vertical: true)
-            if let toast = toasts.current {
-                ToastView(toast: toast).padding(.bottom, 54)
-            }
+            if let toast = toasts.current { ToastView(toast: toast).padding(.bottom, 12) }
         }
         .frame(width: Metrics.popoverWidth)
         .environment(toasts)
         .animation(.smooth(duration: 0.25), value: toasts.current)
     }
-
-    private var maxHeight: CGFloat {
-        (NSScreen.main?.visibleFrame.height ?? 900) - 60
-    }
 }
 
-/// Merged mode: one popover with a tab per widget.
+/// Combined mode: one popover with a tab per widget.
 struct MergedPopover: View {
     var kinds: [WidgetKind]
     @Bindable var selection: MergedSelection
@@ -40,15 +33,15 @@ struct MergedPopover: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
                 ForEach(kinds) { kind in
                     Button {
                         withAnimation(.smooth(duration: 0.2)) { selection.kind = kind }
                         AppDelegate.shared.statusItems?.mergedTabChanged(to: kind)
                     } label: {
                         Image(systemName: kind.symbol)
-                            .font(.system(size: 13, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 28)
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 24)
                             .foregroundStyle(kind == current ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                             .background {
                                 if kind == current { Capsule().fill(kind.accent.gradient) }
@@ -61,19 +54,18 @@ struct MergedPopover: View {
                     .accessibilityAddTraits(kind == current ? .isSelected : [])
                 }
             }
-            .padding(4)
+            .padding(3)
             .glassEffect(.regular, in: .capsule)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .padding([.horizontal, .top], DS.pad)
 
             ZStack(alignment: .bottom) {
                 ScrollView(.vertical) {
-                    WidgetContent(kind: current).id(current).padding(16)
+                    WidgetContent(kind: current).id(current).padding(DS.pad)
                 }
                 .scrollIndicators(.never)
-                .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 900) - 110)
+                .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 900) - 100)
                 .fixedSize(horizontal: false, vertical: true)
-                if let toast = toasts.current { ToastView(toast: toast).padding(.bottom, 54) }
+                if let toast = toasts.current { ToastView(toast: toast).padding(.bottom, 12) }
             }
         }
         .frame(width: Metrics.popoverWidth)
@@ -84,11 +76,9 @@ struct MergedPopover: View {
 
 struct WidgetContent: View {
     var kind: WidgetKind
-    @Environment(MonitorStore.self) private var store
-    @Environment(SettingsStore.self) private var settings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DS.gap) {
             PopoverHeader(kind: kind)
             switch kind {
             case .cpu: CPUDetail()
@@ -100,11 +90,12 @@ struct WidgetContent: View {
             case .battery: BatteryDetail()
             }
             ProcessSection(kind: kind)
-            PopoverFooter()
         }
     }
 }
 
+/// Icon, title, one-line context and status on the left; app actions on the right. The headline number lives in the
+/// stat strip below, so it isn't shown twice.
 struct PopoverHeader: View {
     var kind: WidgetKind
     @Environment(MonitorStore.self) private var store
@@ -112,101 +103,72 @@ struct PopoverHeader: View {
 
     var body: some View {
         let value = PanelValue.make(kind, store: store, settings: settings.settings)
-        HStack(spacing: 10) {
-            WidgetIcon(kind: kind, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(kind.title).font(.system(size: 15, weight: .semibold))
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        HStack(spacing: 8) {
+            WidgetIcon(kind: kind, size: 26)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(kind.title).font(.system(size: 13, weight: .semibold))
+                    StatusPill(level: pillLevel(value.level), text: pillText)
+                }
+                Text(subtitle).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(value.lines.joined(separator: "  "))
-                    .font(.system(size: value.lines.count > 1 ? 15 : 22, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .lineLimit(1)
-                StatusPill(level: value.level, text: pillText(value.level))
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 4)
+            HStack(spacing: 0) {
+                IconButton(symbol: "chart.bar.xaxis", help: "Open Activity Monitor") { ProcessActions.openActivityMonitor() }
+                IconButton(symbol: store.paused ? "play.fill" : "pause.fill", help: store.paused ? "Resume monitoring" : "Pause monitoring") {
+                    store.setPaused(!store.paused)
+                    AppDelegate.shared.statusItems?.refresh()
+                }
+                IconButton(symbol: "gearshape", help: "Settings") { AppDelegate.shared.openSettings() }
+                IconButton(symbol: "power", help: "Quit Topbarac") { NSApp.terminate(nil) }
             }
         }
-        .accessibilityElement(children: .combine)
+        .frame(height: 30)
     }
 
     private var subtitle: String {
         switch kind {
         case .cpu:
-            let cores = store.cpu?.perCore.count ?? ProcessInfo.processInfo.activeProcessorCount
-            return "\(SystemInfo.chipName) · \(cores) cores"
+            "\(SystemInfo.chipName) · \(store.cpu?.perCore.count ?? ProcessInfo.processInfo.activeProcessorCount) cores"
         case .memory:
-            return "\(Format.memory(store.memory?.total ?? ProcessInfo.processInfo.physicalMemory)) installed"
+            "\(Format.memory(store.memory?.total ?? ProcessInfo.processInfo.physicalMemory)) unified memory"
         case .disk:
-            return store.disk?.root.map { "\($0.name) · \(Format.bytes($0.total)) total" } ?? "Volumes"
+            store.disk?.root.map { "\($0.name) · \(Format.bytes($0.total))" } ?? "Volumes"
         case .temperature:
-            let n = store.temperature?.sensors.count ?? 0
-            let fans = store.temperature?.fans.count ?? 0
-            return "\(n) sensors" + (fans > 0 ? " · \(fans) fan\(fans == 1 ? "" : "s")" : "")
+            "\(store.temperature?.sensors.count ?? 0) sensors · \(thermalText)"
         case .gpu:
-            return store.gpu?.name ?? "Graphics"
+            store.gpu?.name ?? "Graphics"
         case .network:
-            return store.network?.interfaces.first(where: { !$0.isVirtual })?.displayName ?? "Not connected"
+            store.network?.interfaces.first(where: { !$0.isVirtual })?.displayName ?? "Not connected"
         case .battery:
-            guard let b = store.battery else { return "Battery" }
-            return b.charging ? "Charging" : (b.onAC ? (b.fullyCharged ? "Fully charged" : "On power adapter") : "On battery")
+            store.battery.map { b in
+                b.charging ? "Charging" : (b.onAC ? (b.fullyCharged ? "Fully charged" : "On power adapter") : "On battery")
+            } ?? "Battery"
         }
     }
 
-    private func pillText(_ level: Level) -> String? {
-        switch kind {
-        case .memory: store.memory.map { "Pressure: \($0.pressure.title)" }
-        case .temperature: thermalText
-        default: nil
+    /// Memory reports pressure, not fill level: macOS fills RAM on purpose, and pressure is what slows things down.
+    private func pillLevel(_ level: Level) -> Level {
+        guard kind == .memory, let pressure = store.memory?.pressure else { return level }
+        switch pressure {
+        case .normal: return .normal
+        case .warning: return .warning
+        case .critical: return .critical
         }
+    }
+
+    private var pillText: String? {
+        guard kind == .memory, let m = store.memory else { return nil }
+        return m.pressure == .normal ? "Pressure OK" : "Pressure \(m.pressure.title.lowercased())"
     }
 
     private var thermalText: String {
         switch store.temperature?.thermalState ?? 0 {
-        case 0: "Thermals nominal"
-        case 1: "Thermals fair"
-        case 2: "Throttling"
-        default: "Critical heat"
+        case 0: "nominal"
+        case 1: "fair"
+        case 2: "throttling"
+        default: "critical"
         }
-    }
-}
-
-struct PopoverFooter: View {
-    @Environment(MonitorStore.self) private var store
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                AppDelegate.shared.openSettings()
-            } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
-            Button {
-                ProcessActions.openActivityMonitor()
-            } label: {
-                Label("Activity Monitor", systemImage: "chart.bar.xaxis")
-            }
-            Spacer()
-            Button {
-                store.setPaused(!store.paused)
-                AppDelegate.shared.statusItems?.refresh()
-            } label: {
-                Image(systemName: store.paused ? "play.fill" : "pause.fill")
-            }
-            .help(store.paused ? "Resume monitoring" : "Pause monitoring")
-            .accessibilityLabel(store.paused ? "Resume monitoring" : "Pause monitoring")
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-            }
-            .help("Quit Topbarac")
-            .accessibilityLabel("Quit Topbarac")
-        }
-        .buttonStyle(.glass)
-        .controlSize(.small)
-        .labelStyle(.titleAndIcon)
-        .padding(.top, 2)
     }
 }

@@ -38,6 +38,8 @@ struct ChartSpec {
     var domain: ClosedRange<Double>?
     /// Temperatures read better on a scale that doesn't start at zero.
     var includesZero = true
+    /// Areas stack on top of each other (parts of one whole, like user + system CPU).
+    var stacked = false
     var format: (Double) -> String
 }
 
@@ -45,15 +47,18 @@ nonisolated private struct ChartPoint: Identifiable, Sendable {
     var series: SeriesKey
     var segment: Int
     var time: Date
-    var value: Double
+    var raw: Double          // the sample itself
+    var base: Double = 0     // bottom of the area (stacked charts)
+    var top: Double          // top of the area / line position
     var id: String { "\(series.rawValue)-\(segment)-\(time.timeIntervalSince1970)" }
     var seriesID: String { "\(series.rawValue)-\(segment)" }
 }
 
-/// One-minute (or longer) chart. Hover or use the arrow keys to read a sample; the chart holds still while you do.
+/// Compact live chart: legend with current values and range switch on one line, then the plot.
+/// Hover or use the arrow keys to read a sample; the chart holds still while you do.
 struct LiveChart: View {
     var spec: ChartSpec
-    var height: CGFloat = 110
+    var height: CGFloat = 78
 
     @Environment(MonitorStore.self) private var store
     @Environment(SettingsStore.self) private var settings
@@ -70,24 +75,18 @@ struct LiveChart: View {
 
     var body: some View {
         let points = frozen ?? currentPoints()
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                legend
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                legend(points)
                 Spacer(minLength: 4)
-                Picker("Range", selection: $range) {
-                    ForEach(ranges) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.mini)
-                .fixedSize()
+                RangeSwitch(ranges: ranges, selection: $range)
             }
             chart(points)
                 .frame(height: height)
                 .overlay {
                     if points.isEmpty {
                         Text(loadingPersisted ? "Loading history…" : "Collecting samples…")
-                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .font(.system(size: 10.5)).foregroundStyle(.tertiary)
                     }
                 }
         }
@@ -95,16 +94,24 @@ struct LiveChart: View {
         .onChange(of: settings.settings.historyEnabled) { if !ranges.contains(range) { range = .m1 } }
     }
 
-    private var legend: some View {
-        HStack(spacing: 10) {
+    /// Legend entries carry the latest value (or the hovered one), so the chart doubles as a readout.
+    private func legend(_ points: [ChartPoint]) -> some View {
+        let shown = selection.map { nearest(to: $0, in: points) } ?? latest(points)
+        return HStack(spacing: 9) {
             ForEach(spec.series) { s in
                 HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 1.5).fill(s.color).frame(width: 8, height: 3)
-                    Text(s.label).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    RoundedRectangle(cornerRadius: 1).fill(s.color).frame(width: 7, height: 7)
+                    Text(s.label).foregroundStyle(.secondary)
+                    if let p = shown.first(where: { $0.series == s.key }) {
+                        Text(spec.format(abs(p.raw))).fontWeight(.semibold).monospacedDigit()
+                    }
                 }
+                .font(.system(size: 10.5))
+                .fixedSize()
             }
         }
         .lineLimit(1)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Data
@@ -112,20 +119,29 @@ struct LiveChart: View {
     private func currentPoints() -> [ChartPoint] {
         if range.persisted { return persisted }
         let since = Date().addingTimeInterval(-(range.seconds ?? 60))
-        var out: [ChartPoint] = []
+        var input: [(SeriesKey, Bool, [SeriesPoint])] = []
         for s in spec.series {
             guard let history = store.series(s.key) else { continue }
-            out += Self.segments(history.window(since: since, maxPoints: 180), key: s.key, mirrored: s.mirrored)
+            input.append((s.key, s.mirrored, history.window(since: since, maxPoints: 150)))
         }
-        return out
+        return Self.build(input, stacked: spec.stacked)
     }
 
-    nonisolated private static func segments(_ points: [SeriesPoint], key: SeriesKey, mirrored: Bool) -> [ChartPoint] {
+    nonisolated private static func build(_ input: [(SeriesKey, Bool, [SeriesPoint])], stacked: Bool) -> [ChartPoint] {
         var out: [ChartPoint] = []
-        var segment = 0
-        for p in points {
-            guard let v = p.value else { segment += 1; continue }
-            out.append(ChartPoint(series: key, segment: segment, time: p.time, value: mirrored ? -v : v))
+        var running: [Date: Double] = [:]
+        for (key, mirrored, points) in input {
+            var segment = 0
+            for p in points {
+                guard let v = p.value else { segment += 1; continue }
+                if stacked {
+                    let base = running[p.time] ?? 0
+                    out.append(ChartPoint(series: key, segment: segment, time: p.time, raw: v, base: base, top: base + v))
+                    running[p.time] = base + v
+                } else {
+                    out.append(ChartPoint(series: key, segment: segment, time: p.time, raw: v, top: mirrored ? -v : v))
+                }
+            }
         }
         return out
     }
@@ -134,15 +150,13 @@ struct LiveChart: View {
         guard range.persisted, let historyStore = store.historyStore else { persisted = []; return }
         loadingPersisted = true
         let specSeries = spec.series.map { ($0.key, $0.mirrored) }
+        let stacked = spec.stacked
         let range = self.range
         let points = await Task.detached(priority: .userInitiated) { () -> [ChartPoint] in
             let since = range.seconds.map { Date().addingTimeInterval(-$0) } ?? (historyStore.oldest() ?? Date().addingTimeInterval(-86400))
             historyStore.flush()
-            var out: [ChartPoint] = []
-            for (key, mirrored) in specSeries {
-                out += Self.segments(historyStore.query(key, since: since, maxPoints: 240), key: key, mirrored: mirrored)
-            }
-            return out
+            let input = specSeries.map { key, mirrored in (key, mirrored, historyStore.query(key, since: since, maxPoints: 200)) }
+            return Self.build(input, stacked: stacked)
         }.value
         persisted = points
         loadingPersisted = false
@@ -151,57 +165,69 @@ struct LiveChart: View {
     // MARK: Chart
 
     private func color(_ key: SeriesKey) -> Color { spec.series.first { $0.key == key }?.color ?? .accentColor }
-    private func label(_ key: SeriesKey) -> String { spec.series.first { $0.key == key }?.label ?? key.rawValue }
     private func isArea(_ key: SeriesKey) -> Bool { spec.series.first { $0.key == key }?.area ?? true }
+
+    private func latest(_ points: [ChartPoint]) -> [ChartPoint] {
+        var best: [SeriesKey: ChartPoint] = [:]
+        for p in points where (best[p.series]?.time ?? .distantPast) <= p.time { best[p.series] = p }
+        return spec.series.compactMap { best[$0.key] }
+    }
 
     @ViewBuilder
     private func chart(_ points: [ChartPoint]) -> some View {
         let selected = selection.map { nearest(to: $0, in: points) } ?? []
+        let ends = selection == nil ? latest(points) : []
         Chart {
             ForEach(points) { p in
                 if isArea(p.series) {
-                    AreaMark(x: .value("Time", p.time), yStart: .value("Zero", 0), yEnd: .value("Value", p.value), series: .value("Series", p.seriesID))
-                        .foregroundStyle(LinearGradient(colors: [color(p.series).opacity(0.38), color(p.series).opacity(0.04)],
-                                                        startPoint: p.value >= 0 ? .top : .bottom, endPoint: p.value >= 0 ? .bottom : .top))
+                    AreaMark(x: .value("Time", p.time), yStart: .value("Base", p.base), yEnd: .value("Value", p.top),
+                             series: .value("Series", p.seriesID))
+                        .foregroundStyle(areaStyle(p))
                         .interpolationMethod(.monotone)
                 }
-                LineMark(x: .value("Time", p.time), y: .value("Value", p.value), series: .value("Series", p.seriesID))
+                LineMark(x: .value("Time", p.time), y: .value("Value", p.top), series: .value("Series", p.seriesID))
                     .foregroundStyle(color(p.series))
-                    .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                    .lineStyle(StrokeStyle(lineWidth: isArea(p.series) ? 1.3 : 1.6, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
+            }
+            ForEach(ends) { p in
+                PointMark(x: .value("Time", p.time), y: .value("Value", p.top))
+                    .foregroundStyle(color(p.series))
+                    .symbolSize(14)
             }
             if let first = selected.first {
                 RuleMark(x: .value("Selected", first.time))
-                    .foregroundStyle(.primary.opacity(0.25))
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                    .annotation(position: .top, alignment: .center, spacing: 2,
-                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
-                        tooltip(selected)
+                    .foregroundStyle(.primary.opacity(0.3))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .annotation(position: .top, alignment: .center, spacing: 0,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                        tooltip(first.time)
                     }
                 ForEach(selected) { p in
-                    PointMark(x: .value("Time", p.time), y: .value("Value", p.value))
+                    PointMark(x: .value("Time", p.time), y: .value("Value", p.top))
                         .foregroundStyle(color(p.series))
-                        .symbolSize(28)
+                        .symbolSize(30)
                 }
             }
         }
         .chartLegend(.hidden)
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3])).foregroundStyle(.primary.opacity(0.12))
-                AxisValueLabel(format: axisFormat).font(.system(size: 9)).foregroundStyle(.tertiary)
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(.primary.opacity(0.08))
-                AxisValueLabel {
-                    if let v = value.as(Double.self) { Text(spec.format(abs(v))).font(.system(size: 9)).foregroundStyle(.tertiary) }
+            if range.persisted {
+                AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                    AxisValueLabel(format: axisFormat).font(.system(size: 8.5)).foregroundStyle(.tertiary)
                 }
             }
         }
-        .modifier(DomainModifier(domain: spec.domain, includesZero: spec.includesZero, mirroredMax: spec.series.contains(where: \.mirrored)
-            ? max(points.map { abs($0.value) }.max() ?? 1, 1) * 1.1 : nil))
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 2)) { value in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3])).foregroundStyle(.primary.opacity(0.12))
+                AxisValueLabel {
+                    if let v = value.as(Double.self) { Text(spec.format(abs(v))).font(.system(size: 8.5)).foregroundStyle(.tertiary) }
+                }
+            }
+        }
+        .modifier(DomainModifier(domain: spec.domain ?? fittedDomain(points), includesZero: spec.includesZero,
+                                 mirroredMax: spec.series.contains(where: \.mirrored) ? max(points.map { abs($0.top) }.max() ?? 1, 1) * 1.15 : nil))
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle().fill(.clear).contentShape(Rectangle())
@@ -209,9 +235,8 @@ struct LiveChart: View {
                         switch phase {
                         case .active(let location):
                             guard let plot = proxy.plotFrame else { return }
-                            let x = location.x - geo[plot].origin.x
                             if frozen == nil { frozen = points }
-                            selection = proxy.value(atX: x, as: Date.self)
+                            selection = proxy.value(atX: location.x - geo[plot].origin.x, as: Date.self)
                         case .ended:
                             selection = nil
                             frozen = nil
@@ -229,13 +254,27 @@ struct LiveChart: View {
         .accessibilityValue(accessibilitySummary(points))
     }
 
-    private var axisFormat: Date.FormatStyle {
-        switch range {
-        case .m1: .dateTime.hour().minute().second()
-        case .m10, .h1, .h24: .dateTime.hour().minute()
-        case .d7, .d30: .dateTime.month(.abbreviated).day()
-        case .all: .dateTime.month(.abbreviated).day()
+    /// Domain for charts without a fixed one. Temperatures hug the data (padded, snapped to 5s) so lines don't sit
+    /// flat in the middle; other charts keep zero and get headroom so a steady value doesn't fill the whole plot.
+    private func fittedDomain(_ points: [ChartPoint]) -> ClosedRange<Double>? {
+        guard !spec.series.contains(where: \.mirrored), let lo = points.map(\.top).min(), let hi = points.map(\.top).max() else { return nil }
+        if !spec.includesZero {
+            let low = ((lo - 3) / 5).rounded(.down) * 5
+            return low...max(low + 10, ((hi + 3) / 5).rounded(.up) * 5)
         }
+        let low = min(0, lo * 1.25), high = max(0, hi * 1.25)
+        return high - low < 1e-9 ? 0...1 : low...high
+    }
+
+    private func areaStyle(_ p: ChartPoint) -> AnyShapeStyle {
+        let c = color(p.series)
+        if spec.stacked { return AnyShapeStyle(c.opacity(0.5)) }
+        let up = p.top >= 0
+        return AnyShapeStyle(LinearGradient(colors: [c.opacity(0.32), c.opacity(0.02)], startPoint: up ? .top : .bottom, endPoint: up ? .bottom : .top))
+    }
+
+    private var axisFormat: Date.FormatStyle {
+        range == .h24 ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day()
     }
 
     private func nearest(to date: Date, in points: [ChartPoint]) -> [ChartPoint] {
@@ -258,28 +297,67 @@ struct LiveChart: View {
         selection = times[max(0, min(times.count - 1, index + direction))]
     }
 
-    private func tooltip(_ selected: [ChartPoint]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(selected.first!.time, format: range.persisted ? .dateTime.month(.abbreviated).day().hour().minute() : .dateTime.hour().minute().second())
-                .font(.system(size: 9.5)).foregroundStyle(.secondary)
-            ForEach(selected) { p in
-                HStack(spacing: 4) {
-                    Circle().fill(color(p.series)).frame(width: 5, height: 5)
-                    Text("\(label(p.series)) \(spec.format(abs(p.value)))").font(.system(size: 10.5, weight: .medium)).monospacedDigit()
-                }
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: .rect(cornerRadius: 7))
+    /// The values themselves are in the legend while hovering; the tooltip only says when.
+    private func tooltip(_ time: Date) -> some View {
+        Text(time, format: range.persisted ? .dateTime.month(.abbreviated).day().hour().minute() : .dateTime.hour().minute().second())
+            .font(.system(size: 9.5, weight: .medium)).monospacedDigit()
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(.regularMaterial, in: .capsule)
     }
 
     private func accessibilitySummary(_ points: [ChartPoint]) -> String {
         spec.series.compactMap { s in
-            let values = points.filter { $0.series == s.key }.map { abs($0.value) }
+            let values = points.filter { $0.series == s.key }.map(\.raw)
             guard let last = values.last, let maxValue = values.max() else { return nil }
             return "\(s.label) now \(spec.format(last)), peak \(spec.format(maxValue))"
         }.joined(separator: ". ")
+    }
+}
+
+/// Range picker as a small menu button ("1m ⌄"): fits next to a full legend at any width.
+struct RangeSwitch: View {
+    var ranges: [ChartRange]
+    @Binding var selection: ChartRange
+
+    var body: some View {
+        Menu {
+            Picker("Range", selection: $selection) {
+                ForEach(ranges.filter { !$0.persisted }) { Text(label($0)).tag($0) }
+                if ranges.contains(where: \.persisted) {
+                    Divider()
+                    ForEach(ranges.filter(\.persisted)) { Text(label($0)).tag($0) }
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 2) {
+                Text(selection.rawValue).font(.system(size: 10, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .frame(height: 17)
+            .background(.primary.opacity(0.06), in: .rect(cornerRadius: 5))
+            .contentShape(.rect)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Chart range")
+        .accessibilityLabel("Chart range, \(label(selection))")
+    }
+
+    private func label(_ r: ChartRange) -> String {
+        switch r {
+        case .m1: "Last minute"
+        case .m10: "Last 10 minutes"
+        case .h1: "Last hour"
+        case .h24: "Last 24 hours"
+        case .d7: "Last 7 days"
+        case .d30: "Last 30 days"
+        case .all: "All history"
+        }
     }
 }
 

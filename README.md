@@ -14,13 +14,13 @@ thresholds that turn it yellow or red.
 
 | Widget | Menu bar | Popover |
 |---|---|---|
-| CPU | usage or power | P/E core bars, cluster frequency, load average, uptime, chart with P and E lines |
-| Memory | percent, amount or pressure | app / wired / compressed / cached breakdown, pressure, swap, free inactive memory |
+| CPU | usage or power | stacked user/system chart, P/E core bars, frequency, load average, uptime |
+| Memory | percent, amount or pressure | stacked app/wired/compressed chart, cached and swap, pressure, free inactive memory |
 | Disk | space used, busy time or read/write speed | every volume with purgeable space, eject/open, mirrored read/write chart, Trash and caches |
 | Temperature | CPU, GPU, SSD, hottest sensor or fan RPM | all sensors grouped with session min/max, fans (read-only) |
 | GPU | usage, memory or power | renderer/tiler engines, memory in use, frequency, power |
 | Network | download, upload or both | per-interface rates, session totals, apps using the network |
-| Battery | charge, watts or time left | health, cycles, voltage, adapter, power in/out |
+| Battery | charge, watts or time left | power in/out chart, health, cycles, voltage, adapter |
 
 Every popover lists the top processes for its metric, with helpers folded into their app. Hover to quit; right-click to
 force quit, kill, reveal in Finder or copy the PID. Processes of other users can be stopped after an administrator
