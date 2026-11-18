@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleDisplayName</key><string>Topbarac</string>
+    <key>CFBundleExecutable</key><string>Topbarac</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIdentifier</key><string>com.farvisun.topbarac</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>Topbarac</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Farvisun. MIT licensed.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Topbarac asks Finder to empty the Trash when you choose Empty Trash, and runs the administrator prompt when you free memory or stop another user's process.</string>
+    <key>SUFeedURL</key><string>https://github.com/farvisun/topbarac/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key><string>ggnWDfmhPNgXecRJodhEuyB5AIsZ2Ir0M8yHMr3KO+8=</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>86400</integer>
+</dict>
+</plist>
