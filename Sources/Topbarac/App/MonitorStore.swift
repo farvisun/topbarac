@@ -107,6 +107,7 @@ final class MonitorStore {
             for rule in s.alertRules where rule.enabled && !plan.widgets.contains(rule.metric.widget) { plan.background.insert(rule.metric.widget) }
         }
         plan.detail = openDetails
+        plan.appUsage = s.historyEnabled
         plan.needsPower = (s.config(.cpu).enabled && s.config(.cpu).metric == .cpuPower)
             || (s.config(.gpu).enabled && s.config(.gpu).metric == .gpuPower)
         if processWindowOpen { plan.detail.formUnion([.cpu, .network]) }
@@ -167,6 +168,10 @@ final class MonitorStore {
 
         if let historyStore {
             historyStore.record(values, at: frame.time)
+            // Only meaningful when the probe has a previous sample to diff against (nil on the first and after a gap).
+            if let interval = frame.processInterval, let list = frame.processes {
+                historyStore.recordAppUsage(list, interval: interval, at: frame.time)
+            }
             if frame.time.timeIntervalSince(lastPrune) > 3600 {
                 lastPrune = frame.time
                 historyStore.prune(retention: s.historyRetention.seconds)

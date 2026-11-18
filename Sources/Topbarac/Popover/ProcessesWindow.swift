@@ -11,12 +11,19 @@ struct ProcessesWindow: View {
     @State private var toasts = ToastCenter()
     @State private var confirmForce = false
     @State private var order: [KeyPathComparator<ProcessRowModel>] = []
+    /// nil = live table; otherwise how far back the usage history goes.
+    @State private var usageDays: Int?
 
     private var rows: [ProcessRowModel] {
         let filtered = search.isEmpty ? store.processes : store.processes.filter {
             ProcessIcons.displayName(for: $0).localizedCaseInsensitiveContains(search) || String($0.pid).hasPrefix(search)
         }
-        return filtered.map { ProcessRowModel($0, name: ProcessIcons.displayName(for: $0)) }.sorted(using: order.isEmpty ? [ProcessRowModel.comparator(sort)] : order)
+        let comparators = order.isEmpty ? [ProcessRowModel.comparator(sort)] : order
+        return filtered.map { p in
+            let members = p.members.map { ProcessRowModel($0, name: $0.name) }.sorted(using: comparators)
+            return ProcessRowModel(p, name: ProcessIcons.displayName(for: p), children: members.isEmpty ? nil : members)
+        }
+        .sorted(using: comparators)
     }
 
     private var selected: ProcessSample? { store.processes.first { $0.pid == selection } }
@@ -25,7 +32,9 @@ struct ProcessesWindow: View {
         let bits = settings.settings.networkUnit == .bits
         let rows = self.rows
         VStack(spacing: 0) {
-            if store.processes.isEmpty {
+            if let usageDays {
+                AppUsageList(days: usageDays)
+            } else if store.processes.isEmpty {
                 VStack(spacing: 10) {
                     ProgressView().controlSize(.small)
                     Text("Reading processes…").foregroundStyle(.secondary)
@@ -34,7 +43,7 @@ struct ProcessesWindow: View {
             } else if rows.isEmpty {
                 ContentUnavailableView.search(text: search)
             } else {
-                Table(rows, selection: $selection, sortOrder: $order) {
+                Table(rows, children: \.children, selection: $selection, sortOrder: $order) {
                     TableColumn("Name", value: \.name) { row in
                         HStack(spacing: 7) {
                             Image(nsImage: ProcessIcons.icon(for: row.sample)).resizable().frame(width: 16, height: 16)
@@ -92,6 +101,18 @@ struct ProcessesWindow: View {
         .animation(.smooth(duration: 0.25), value: toasts.current)
         .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
         .toolbar {
+            if settings.settings.historyEnabled {
+                ToolbarItem(placement: .navigation) {
+                    Picker("Show", selection: $usageDays) {
+                        Text("Now").tag(Int?.none)
+                        Text("Today").tag(Int?.some(1))
+                        Text("7 Days").tag(Int?.some(7))
+                        Text("30 Days").tag(Int?.some(30))
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Live processes, or which apps used the most CPU and energy over time")
+                }
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     if let p = selected { quit(p) }
@@ -169,10 +190,13 @@ nonisolated struct ProcessRowModel: Identifiable, Sendable {
     var energy: Double { sample.energyWatts ?? -1 }
     var disk: Double { sample.diskReadBps + sample.diskWriteBps }
     var network: Double { sample.netInBps + sample.netOutBps }
+    /// Helper processes folded into this app, shown as an expandable tree.
+    var children: [ProcessRowModel]?
 
-    init(_ sample: ProcessSample, name: String) {
+    init(_ sample: ProcessSample, name: String, children: [ProcessRowModel]? = nil) {
         self.sample = sample
         self.name = name
+        self.children = children
     }
 
     static func comparator(_ sort: ProcessSort) -> KeyPathComparator<ProcessRowModel> {
@@ -231,5 +255,71 @@ private struct StatusFooter: View {
         .frame(height: 26)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+}
+
+/// Which apps used the most CPU time and energy over the last day(s), from the on-disk history.
+private struct AppUsageList: View {
+    var days: Int
+    @Environment(MonitorStore.self) private var store
+    @State private var rows: [AppUsage]?
+
+    var body: some View {
+        Group {
+            if let rows, rows.isEmpty {
+                ContentUnavailableView("No usage recorded yet", systemImage: "clock",
+                                       description: Text("Topbarac samples apps every 30 seconds while History is on."))
+            } else if let rows {
+                let peak = max(1, rows.first?.cpuSeconds ?? 1)
+                List(rows) { row in
+                    HStack(spacing: 10) {
+                        Image(nsImage: icon(row.name)).resizable().frame(width: 18, height: 18)
+                        Text(row.name).lineLimit(1)
+                        Spacer(minLength: 8)
+                        MeterBar(fraction: row.cpuSeconds / peak, tint: WidgetKind.cpu.accent, height: 5).frame(width: 140)
+                        Text(cpuTime(row.cpuSeconds)).monospacedDigit().fontWeight(.medium).frame(width: 78, alignment: .trailing)
+                            .help("CPU time: one core fully busy for this long")
+                        Text(row.energyJoules > 0 ? energy(row.energyJoules) : "—").monospacedDigit().foregroundStyle(.secondary)
+                            .frame(width: 70, alignment: .trailing)
+                            .help("Energy used (your own apps only)")
+                    }
+                    .padding(.vertical, 1)
+                }
+                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    HStack {
+                        Text("App"); Spacer()
+                        Text("CPU time").frame(width: 78, alignment: .trailing)
+                        Text("Energy").frame(width: 70, alignment: .trailing)
+                    }
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 22).padding(.vertical, 5)
+                    .background(.bar)
+                }
+            } else {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: days) {
+            guard let historyStore = store.historyStore else { rows = []; return }
+            let since = Date().addingTimeInterval(-Double(days) * 86400)
+            rows = await Task.detached(priority: .userInitiated) { historyStore.appUsage(since: since, limit: 100) }.value
+        }
+    }
+
+    private func icon(_ name: String) -> NSImage {
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == name }), let icon = app.icon { return icon }
+        return NSWorkspace.shared.icon(for: .unixExecutable)
+    }
+
+    private func cpuTime(_ s: Double) -> String {
+        let total = Int(s.rounded())
+        return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
+                             : String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private func energy(_ joules: Double) -> String {
+        let wh = joules / 3600
+        return wh >= 1 ? String(format: "%.1f Wh", wh) : String(format: "%.0f mWh", wh * 1000)
     }
 }
