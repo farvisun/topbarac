@@ -243,6 +243,9 @@ public struct ProcessSample: Sendable, Equatable, Identifiable {
     public var netInBps: Double = 0
     public var netOutBps: Double = 0
     public var groupCount: Int = 1        // >1 when helper processes are folded into their app
+    /// The individual processes folded into this group, busiest first. Empty for single processes and for the
+    /// members themselves, so the tree is at most one level deep.
+    public var members: [ProcessSample] = []
     public var isOwned: Bool
     public init(pid: Int32, name: String, path: String?, uid: UInt32, cpu: Double, memory: UInt64,
                 diskReadBps: Double, diskWriteBps: Double, energyWatts: Double?, isOwned: Bool) {

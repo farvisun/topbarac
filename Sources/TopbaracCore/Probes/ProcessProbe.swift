@@ -4,9 +4,11 @@ import Foundation
 public enum ProcessGrouping {
     /// Folds helper processes into the process responsible for them (Chrome renderers into Chrome), summing CPU,
     /// memory, disk, energy and network. Processes whose responsible process isn't in the list stay on their own.
+    /// Groups of more than one keep their parts in `members` (busiest first) so the UI can expand them.
     public static func group(_ samples: [ProcessSample], responsible: [Int32: Int32]) -> [ProcessSample] {
         let byPid = Dictionary(samples.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         var groups: [Int32: ProcessSample] = [:]
+        var members: [Int32: [ProcessSample]] = [:]
         for s in samples {
             var owner = s.pid
             if let r = responsible[s.pid], r != s.pid, byPid[r] != nil { owner = r }
@@ -21,8 +23,16 @@ public enum ProcessGrouping {
             if let e = s.energyWatts { g.energyWatts = (g.energyWatts ?? 0) + e }
             g.groupCount += 1
             groups[owner] = g
+            var member = s
+            member.members = []
+            members[owner, default: []].append(member)
         }
-        return Array(groups.values)
+        return groups.values.map { g in
+            guard g.groupCount > 1 else { return g }
+            var g = g
+            g.members = (members[g.pid] ?? []).sorted { $0.cpu != $1.cpu ? $0.cpu > $1.cpu : $0.pid < $1.pid }
+            return g
+        }
     }
 }
 

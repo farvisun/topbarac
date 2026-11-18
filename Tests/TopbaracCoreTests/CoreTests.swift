@@ -113,6 +113,11 @@ import Testing
         let app = try! #require(grouped.first { $0.pid == 10 })
         #expect(app.cpu == 16 && app.memory == 111 && app.groupCount == 3 && app.name == "p10")
         #expect(grouped.count == 2)
+        // The parts stay available for a tree view, busiest first, one level deep.
+        #expect(app.members.map(\.pid) == [10, 20, 21])
+        #expect(app.members.map(\.cpu) == [10, 5, 1])
+        #expect(app.members.allSatisfy { $0.members.isEmpty && $0.groupCount == 1 })
+        #expect(grouped.first { $0.pid == 30 }?.members.isEmpty == true)
     }
 
     @Test func parsesPS() {
