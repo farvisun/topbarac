@@ -14,6 +14,8 @@ enum Snapshotter {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let store = MonitorStore.shared
         for kind in WidgetKind.allCases { store.openDetail(kind) }
+        store.setOverview(open: true)
+        store.setProcessWindow(open: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
             captureAll(to: dir)
             NSApp.terminate(nil)
@@ -28,6 +30,11 @@ enum Snapshotter {
                 capture(PopoverChrome { WidgetContent(kind: kind).padding(DS.pad) }, appearance: ap,
                         to: dir.appendingPathComponent("\(kind.rawValue)-\(name).png"))
             }
+            capture(PopoverChrome { OverviewContent { _ in }.padding(DS.pad) }, appearance: ap,
+                    to: dir.appendingPathComponent("overview-\(name).png"))
+            capture(WelcomeView {}, appearance: ap, to: dir.appendingPathComponent("welcome-\(name).png"))
+            capture(ProcessesWindow(sort: .cpu).frame(width: 760, height: 420), appearance: ap,
+                    to: dir.appendingPathComponent("processes-\(name).png"))
             capture(StylesSheet(), appearance: ap, to: dir.appendingPathComponent("styles-\(name).png"))
             capture(SettingsView().frame(width: 780, height: 600), appearance: ap, to: dir.appendingPathComponent("settings-\(name).png"))
         }
