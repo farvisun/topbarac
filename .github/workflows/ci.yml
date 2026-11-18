@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, production]
+    branches: [master, production]
     paths-ignore: ["site/**", "**.md"]
   pull_request:
   workflow_dispatch:
