@@ -99,4 +99,4 @@ stored only if you turn it on, in `~/Library/Application Support/Topbarac`.
 
 ## License
 
-MIT
+[Apache-2.0](LICENSE). Keep the [NOTICE](NOTICE) in any copy or derivative work.

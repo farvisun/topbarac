@@ -16,7 +16,7 @@
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>© 2026 Farvisun. MIT licensed.</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Mohammad Askari. Apache License 2.0.</string>
     <key>NSAppleEventsUsageDescription</key><string>Topbarac asks Finder to empty the Trash when you choose Empty Trash, and runs the administrator prompt when you free memory or stop another user's process.</string>
     <key>SUFeedURL</key><string>https://github.com/farvisun/topbarac/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key><string>ggnWDfmhPNgXecRJodhEuyB5AIsZ2Ir0M8yHMr3KO+8=</string>
