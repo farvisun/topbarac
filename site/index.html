@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Topbarac: system monitor for the macOS menu bar</title>
-<meta name="description" content="Topbarac is a free, open-source macOS menu bar app with CPU, memory, disk, temperature, GPU, network and battery widgets. Liquid Glass popovers, no accounts, no telemetry.">
+<meta name="description" content="Topbarac is a free, open-source macOS menu bar app with CPU, memory, disk, temperature, GPU, network and battery widgets, a health check that tells you why your Mac is slow, and tools to fix it. No accounts, no telemetry.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)">
@@ -16,12 +16,12 @@
 <meta property="og:title" content="Topbarac: your whole Mac, one glance up">
 <meta property="og:description" content="Seven menu bar widgets for macOS 26: CPU, memory, disk, temperature, GPU, network and battery. Free, open source, no telemetry.">
 <meta property="og:url" content="https://farvisun.github.io/topbarac/">
-<meta property="og:image" content="https://farvisun.github.io/topbarac/assets/shots/cpu-dark.png">
+<meta property="og:image" content="https://farvisun.github.io/topbarac/assets/shots/overview-dark.png">
 <meta property="og:image:alt" content="The Topbarac CPU popover with usage, a per-core chart and top processes">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Topbarac: your whole Mac, one glance up">
 <meta name="twitter:description" content="Seven menu bar widgets for macOS 26. Free, open source, no telemetry.">
-<meta name="twitter:image" content="https://farvisun.github.io/topbarac/assets/shots/cpu-dark.png">
+<meta name="twitter:image" content="https://farvisun.github.io/topbarac/assets/shots/overview-dark.png">
 <meta name="twitter:image:alt" content="The Topbarac CPU popover with usage, a per-core chart and top processes">
 <style>
 :root{
@@ -215,6 +215,7 @@ footer a:hover{color:var(--text)}
     <a class="brand" href="#top" aria-label="Topbarac home"><img src="assets/icon.png" alt="" width="28" height="28"><span>Topbarac</span></a>
     <nav aria-label="Primary">
       <ul>
+        <li><a href="#overview">Overview</a></li>
         <li><a href="#widgets">Widgets</a></li>
         <li><a href="#styles">Styles</a></li>
         <li><a href="#manage">Manage</a></li>
@@ -233,7 +234,7 @@ footer a:hover{color:var(--text)}
     <div>
       <p class="eyebrow"><img src="assets/icon.png" alt="" width="20" height="20">Free and open source · macOS 26+</p>
       <h1><span>Your whole Mac,</span> <span class="grad">one glance up.</span></h1>
-      <p class="lead">Topbarac puts CPU, memory, disk, temperature, GPU, network and battery in your menu bar. Click any of them for a Liquid Glass popover with charts, details and the processes behind the numbers.</p>
+      <p class="lead">Topbarac puts CPU, memory, disk, temperature, GPU, network and battery in your menu bar. Click any of them for a Liquid Glass popover with charts, details and the processes behind the numbers. When the Mac feels slow, it tells you why and fixes it in one click.</p>
       <div class="btns">
         <a class="btn primary" href="#install"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>Install</a>
         <a class="btn ghost" href="https://github.com/farvisun/topbarac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5m8-10 5 5-5 5"/></svg>View source</a>
@@ -241,9 +242,9 @@ footer a:hover{color:var(--text)}
       <p class="fine">MIT licensed · Universal build for Apple silicon and Intel · Swift and SwiftUI</p>
     </div>
     <div class="fan">
-      <div class="frame f2"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="" width="641" height="1400" loading="lazy"></picture></div>
-      <div class="frame f3"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="" width="562" height="1400" loading="lazy"></picture></div>
-      <div class="frame f1"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="Topbarac CPU popover showing 79% usage, a one-minute chart with P-core and E-core lines, per-core bars and the top CPU processes" width="635" height="1400" fetchpriority="high"></picture></div>
+      <div class="frame f2"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="" width="680" height="1052" loading="lazy"></picture></div>
+      <div class="frame f3"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="" width="680" height="1318" loading="lazy"></picture></div>
+      <div class="frame f1"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="Topbarac CPU popover: usage, frequency and load in one strip, a stacked user and system chart with threshold lines, Performance and Efficiency core bars and the top CPU apps" width="680" height="1052" fetchpriority="high"></picture></div>
     </div>
   </div>
 
@@ -255,6 +256,33 @@ footer a:hover{color:var(--text)}
       <li class="glass"><b class="grad">0</b><span>accounts, telemetry or helper daemons</span></li>
     </ul>
   </div>
+
+  <section id="overview" aria-labelledby="overview-h">
+    <div class="wrap">
+      <div class="head">
+        <span class="kick">Overview</span>
+        <h2 id="overview-h">Why is my Mac slow? Now you know.</h2>
+        <p>One more menu bar item, or the first tab of the combined item, with your whole Mac on one screen. A shortcut opens it from any app.</p>
+      </div>
+      <article class="widget" aria-labelledby="overview-a">
+        <div class="txt">
+          <span class="label grad">Health check</span>
+          <h3 id="overview-a">The problem, the culprit and the fix.</h3>
+          <p class="tag">Not just numbers: what they mean.</p>
+          <ul class="dots">
+            <li>Names the app hogging the CPU, eating memory or keeping the disk busy, with Quit, Free memory or Analyze storage one click away</li>
+            <li>Spots thermal throttling, heavy swap, a nearly full disk and a low battery</li>
+            <li>Lists the apps keeping your Mac awake</li>
+            <li>Every widget as a card with its last minute; click one for the details, Esc to come back</li>
+            <li>⌘1–⌘7 jump between widgets, ⌘0 back to the overview</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/overview-light.png"><img src="assets/shots/overview-dark.png" alt="Overview popover: a health check naming the app using the most CPU with a Quit button and low memory with a Free button, apps keeping the Mac awake, and a card with a sparkline for each widget" width="680" height="1368" loading="lazy"></picture></div>
+        </figure>
+      </article>
+    </div>
+  </section>
 
   <section id="widgets" aria-labelledby="widgets-h">
     <div class="wrap">
@@ -270,15 +298,14 @@ footer a:hover{color:var(--text)}
           <h3 id="cpu-h">Every core, Performance and Efficiency.</h3>
           <p class="tag">Total usage, and exactly where it goes.</p>
           <ul class="dots">
-            <li>Total usage and a bar per core, split into Performance and Efficiency cores</li>
-            <li>Busiest core at a glance</li>
-            <li>P and E cluster frequency</li>
+            <li>Stacked chart of user and system time, with your warning and critical lines</li>
+            <li>A bar per core, Performance and Efficiency side by side, or a per-core heatmap of the last minute</li>
+            <li>P and E cluster frequency, busiest core</li>
             <li>Load average for 1, 5 and 15 minutes, and uptime</li>
-            <li>One-minute chart with separate P and E lines</li>
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="CPU popover: usage, frequency and load tiles, a chart of total, P-core and E-core usage, per-core bars, load average, uptime and top CPU processes" width="635" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/cpu-light.png"><img src="assets/shots/cpu-dark.png" alt="CPU popover: usage, frequency and load, a stacked user and system chart, per-core bars and top CPU apps" width="680" height="1052" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -290,12 +317,12 @@ footer a:hover{color:var(--text)}
           <ul class="dots">
             <li>Used memory as app + wired + compressed, against installed memory</li>
             <li>Cached files, swap and memory pressure</li>
-            <li>Stacked breakdown bar</li>
+            <li>Stacked chart of app, wired and compressed memory over time, plus a breakdown bar</li>
             <li>“Free inactive memory” runs <code>purge</code> after an administrator prompt</li>
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="Memory popover: used and installed memory, a stacked breakdown bar, cached files, swap, memory pressure and top memory processes" width="641" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/memory-light.png"><img src="assets/shots/memory-dark.png" alt="Memory popover: used and installed memory, a stacked breakdown bar, cached files, swap, memory pressure and top memory processes" width="680" height="1052" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -310,10 +337,11 @@ footer a:hover{color:var(--text)}
             <li>Mirrored read/write chart</li>
             <li>Trash size with Empty Trash (through Finder, asks first)</li>
             <li>User caches size with Show in Finder; nothing is ever deleted automatically</li>
+            <li>Storage analyzer: Docker, Xcode, npm, pnpm, pip and Homebrew caches, Downloads, and a drill-down of your home folder</li>
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/disk-light.png"><img src="assets/shots/disk-dark.png" alt="Disk popover: volumes with free space, read and write speed, a mirrored read/write chart, Trash and caches sizes" width="599" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/disk-light.png"><img src="assets/shots/disk-dark.png" alt="Disk popover: volumes with free space, read and write speed, a mirrored read/write chart, Trash and caches sizes" width="680" height="1242" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -330,7 +358,7 @@ footer a:hover{color:var(--text)}
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="Temperature popover: sensors grouped by CPU, GPU, SSD, battery and SoC with minimum and maximum, fan speeds and thermal state" width="562" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/temperature-light.png"><img src="assets/shots/temperature-dark.png" alt="Temperature popover: sensors grouped by CPU, GPU, SSD, battery and SoC with minimum and maximum, fan speeds and thermal state" width="680" height="1318" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -347,7 +375,7 @@ footer a:hover{color:var(--text)}
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/gpu-light.png"><img src="assets/shots/gpu-dark.png" alt="GPU popover: utilization, renderer and tiler engines, memory in use, frequency and power" width="611" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/gpu-light.png"><img src="assets/shots/gpu-dark.png" alt="GPU popover: utilization, renderer and tiler engines, memory in use, frequency and power" width="680" height="1062" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -355,16 +383,17 @@ footer a:hover{color:var(--text)}
         <div class="txt">
           <span class="label grad">Network</span>
           <h3 id="network-h">Live traffic, and who is using it.</h3>
-          <p class="tag">Download and upload, per interface and per app.</p>
+          <p class="tag">Download and upload, per interface and per app, and how good the link is.</p>
           <ul class="dots">
             <li>Live download and upload speed</li>
             <li>Totals for this session</li>
             <li>Per-interface rates; VPN tunnels are shown but not counted twice</li>
             <li>Top apps using the network</li>
+            <li>Wi‑Fi signal, channel and link rate, and latency to your router and the internet (pinged only while the popover is open)</li>
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame wide"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/network-light.png"><img src="assets/shots/network-dark.png" alt="Network popover: download and upload speed, session total, a mirrored traffic chart, interfaces and top network apps" width="1002" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/network-light.png"><img src="assets/shots/network-dark.png" alt="Network popover: download and upload speed, session total, a mirrored traffic chart, interfaces and top network apps" width="680" height="1204" loading="lazy"></picture></div>
         </figure>
       </article>
 
@@ -375,13 +404,14 @@ footer a:hover{color:var(--text)}
           <p class="tag">Where the power is going, and how much is left.</p>
           <ul class="dots">
             <li>Charge level and time to full or empty</li>
-            <li>Watts in and out</li>
+            <li>Watts in and out, charted over time</li>
             <li>Maximum capacity (health) and cycle count</li>
             <li>Voltage and adapter wattage</li>
+            <li>Batteries of connected Bluetooth accessories: AirPods, mice, keyboards, trackpads</li>
           </ul>
         </div>
         <figure class="shot">
-          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/battery-light.png"><img src="assets/shots/battery-dark.png" alt="Battery popover: charge, power in and out, time remaining, maximum capacity, cycle count, voltage and adapter wattage" width="656" height="1400" loading="lazy"></picture></div>
+          <div class="frame"><picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/battery-light.png"><img src="assets/shots/battery-dark.png" alt="Battery popover: charge, power in and out, time remaining, maximum capacity, cycle count, voltage and adapter wattage" width="680" height="1094" loading="lazy"></picture></div>
         </figure>
       </article>
     </div>
@@ -395,7 +425,7 @@ footer a:hover{color:var(--text)}
         <p>Numbers, Sparkline, Bars, Ring or Level meter. Pick the one that reads best for you.</p>
       </div>
       <figure class="styles-shot">
-        <picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/styles-light.png"><img src="assets/shots/styles-dark.png" alt="The five panel styles side by side: Numbers, Sparkline, Bars, Ring and Level meter, each showing CPU, memory, temperature, GPU and battery" width="1400" height="408" loading="lazy"></picture>
+        <picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/styles-light.png"><img src="assets/shots/styles-dark.png" alt="The five panel styles side by side: Numbers, Sparkline, Bars, Ring and Level meter, each showing CPU, memory, temperature, GPU and battery" width="1386" height="404" loading="lazy"></picture>
       </figure>
       <div class="grid two">
         <div class="card glass">
@@ -445,9 +475,20 @@ footer a:hover{color:var(--text)}
         <div class="card glass">
           <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></div>
           <h3>All Processes window</h3>
-          <p>A full window of every process, with search and sort.</p>
+          <p>A sortable table of every process with a one-minute CPU sparkline per app and helpers expandable under their app. With History on, see which apps used the most CPU and energy today, this week or this month.</p>
+        </div>
+        <div class="card glass">
+          <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg></div>
+          <h3>Where the space went</h3>
+          <p>The storage analyzer measures the usual space hogs and walks your home folder. It shows and reveals in Finder; deleting stays your call.</p>
         </div>
       </div>
+      <figure class="styles-shot">
+        <picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/processes-light.png"><img src="assets/shots/processes-dark.png" alt="All Processes window: a sortable table with app icons, a CPU sparkline per app, CPU, memory, energy, disk and network columns, and expandable helper processes" width="1760" height="840" loading="lazy"></picture>
+      </figure>
+      <figure class="styles-shot">
+        <picture><source media="(prefers-color-scheme: light)" srcset="assets/shots/storage-light.png"><img src="assets/shots/storage-dark.png" alt="Storage window: Docker data, caches, pnpm, pip, npm and Homebrew caches, Downloads and Simulator devices, each with its size and a bar" width="1360" height="836" loading="lazy"></picture>
+      </figure>
     </div>
   </section>
 
@@ -469,12 +510,12 @@ footer a:hover{color:var(--text)}
           <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg></div>
           <h3>History</h3>
           <p>Charts show 1 min, 10 min or 1 h from memory. Optional on-disk history (off by default) keeps data in SQLite on your Mac only: 10 s averages for 7 days, 1 min for 90 days, 10 min after that.</p>
-          <p>Browse 24 h, 7 d, 30 d or All. Export to CSV, or clear it.</p>
+          <p>Browse 24 h, 7 d, 30 d or All, and see per-app CPU time and energy by hour. Export to CSV, or clear it.</p>
         </div>
         <div class="card glass">
           <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M3 14l4-5 4 6 4-8 6 9"/></svg></div>
           <h3>Charts you can read</h3>
-          <p>Hover, or use the arrow keys, to read any sample. The chart holds still while you look. Sleep and wake leave a gap instead of a fake spike.</p>
+          <p>The legend carries the live value; hover, or use the arrow keys, to read any sample while the chart holds still. Warning and critical lines, fired alerts and the low, average and peak of the range are marked. Sleep and wake leave a gap instead of a fake spike.</p>
         </div>
         <div class="card glass">
           <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 21a8 8 0 0 1-1-15.9C14 4 19 3 20 3c0 1-1 6-2 10a8 8 0 0 1-7 8z"/><path d="M4 21c4-5 7-8 11-11"/></svg></div>
@@ -499,7 +540,7 @@ footer a:hover{color:var(--text)}
       <div class="grid">
         <div class="card glass">
           <h3>Nothing to sign up for</h3>
-          <p>No accounts and no analytics. The only network request is a daily update check (Sparkle, against GitHub releases).</p>
+          <p>No accounts and no analytics. The only network traffic is a daily update check (Sparkle, against GitHub releases) and, while the Network popover is open, a ping to your router and an address you choose (1.1.1.1 by default) to measure latency.</p>
         </div>
         <div class="card glass">
           <h3>Nothing extra installed</h3>
