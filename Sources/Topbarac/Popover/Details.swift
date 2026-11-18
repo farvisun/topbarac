@@ -8,6 +8,7 @@ private func percentAxis(_ v: Double) -> String { "\(Int((v * 100).rounded()))%"
 struct CPUDetail: View {
     @Environment(MonitorStore.self) private var store
     @Environment(SettingsStore.self) private var settings
+    @AppStorage("cpu.coresView") private var coresView = "now"
 
     var body: some View {
         let c = store.cpu ?? CPUSnapshot()
@@ -28,12 +29,23 @@ struct CPUDetail: View {
                 LiveChart(spec: ChartSpec(series: [
                     ChartSeries(key: .cpuUser, label: "User", color: WidgetKind.cpu.accent),
                     ChartSeries(key: .cpuSystem, label: "System", color: Color(red: 0.98, green: 0.36, blue: 0.42)),
-                ], domain: 0...1, stacked: true, format: percentAxis))
+                ], domain: 0...1, stacked: true, thresholds: ChartSpec.thresholds(config, scale: 0.01), kind: .cpu, format: percentAxis))
             }
             Card {
                 VStack(alignment: .leading, spacing: 7) {
-                    SectionTitle("Cores", trailing: c.busiestCore.map { "Busiest #\($0.index + 1) · \(Format.percent($0.usage)) · up \(Format.duration(c.uptime))" })
-                    CoreGrid(snapshot: c, config: config)
+                    SectionTitle("Cores") {
+                        HStack(spacing: 6) {
+                            if let busiest = c.busiestCore {
+                                Text("#\(busiest.index + 1) \(Format.percent(busiest.usage)) · up \(Format.duration(c.uptime))")
+                            }
+                            CoresViewSwitch(selection: $coresView)
+                        }
+                    }
+                    if coresView == "history" {
+                        CoreHeatmap(snapshot: c, config: config)
+                    } else {
+                        CoreGrid(snapshot: c, config: config)
+                    }
                 }
             }
         }
@@ -76,6 +88,105 @@ struct CoreGrid: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: snapshot.perCore)
+    }
+}
+
+/// Two icon toggles: bars (now) or heatmap (last two minutes).
+private struct CoresViewSwitch: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach([("now", "chart.bar.fill", "Current load per core"), ("history", "square.grid.3x3.fill", "Per-core history (last 60 samples)")], id: \.0) { id, symbol, help in
+                Button { selection = id } label: {
+                    Image(systemName: symbol).font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(selection == id ? .primary : .tertiary)
+                        .frame(width: 20, height: 15)
+                        .background(selection == id ? Color.primary.opacity(0.1) : .clear, in: .rect(cornerRadius: 4))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(help)
+                .accessibilityLabel(help)
+                .accessibilityAddTraits(selection == id ? .isSelected : [])
+            }
+        }
+        .padding(1)
+        .background(.primary.opacity(0.05), in: .rect(cornerRadius: 5))
+    }
+}
+
+/// One row per core, one column per sample, colour = load. Shows which cores were busy and when, which bars can't.
+struct CoreHeatmap: View {
+    var snapshot: CPUSnapshot
+    var config: WidgetConfig
+    @Environment(MonitorStore.self) private var store
+    @State private var hover: (column: Int, row: Int)?
+
+    var body: some View {
+        let samples = store.coreHistory()
+        let kinds = snapshot.coreKinds
+        // Performance cores on top, then efficiency cores (they are numbered first on Apple silicon).
+        let order = (0..<(samples.last?.usage.count ?? 0)).sorted { a, b in
+            let ka = kinds.indices.contains(a) && kinds[a] == .performance ? 0 : 1
+            let kb = kinds.indices.contains(b) && kinds[b] == .performance ? 0 : 1
+            return ka == kb ? a < b : ka < kb
+        }
+        let rowHeight: CGFloat = order.count > 12 ? 3.5 : 5
+        let pCount = order.filter { kinds.indices.contains($0) && kinds[$0] == .performance }.count
+        HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 0) {
+                if pCount > 0 && pCount < order.count {
+                    Text("P").frame(height: CGFloat(pCount) * (rowHeight + 1), alignment: .center)
+                    Text("E").frame(height: CGFloat(order.count - pCount) * (rowHeight + 1), alignment: .center)
+                }
+            }
+            .font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+            Canvas { context, size in
+                guard !samples.isEmpty, !order.isEmpty else { return }
+                let columns = 60
+                let w = size.width / CGFloat(columns)
+                let offset = columns - samples.count
+                for (c, sample) in samples.enumerated() {
+                    for (r, core) in order.enumerated() where core < sample.usage.count {
+                        let u = sample.usage[core]
+                        let rect = CGRect(x: CGFloat(offset + c) * w, y: CGFloat(r) * (rowHeight + 1), width: max(1, w - 0.5), height: rowHeight)
+                        context.fill(Path(rect), with: .color(color(u)))
+                    }
+                }
+            }
+            .frame(height: CGFloat(order.count) * (rowHeight + 1))
+            .background(.primary.opacity(0.04))
+            .clipShape(.rect(cornerRadius: 3))
+            .overlay {
+                GeometryReader { geo in
+                    Color.clear.contentShape(.rect).onContinuousHover { phase in
+                        if case .active(let p) = phase {
+                            let column = Int(p.x / geo.size.width * 60) - (60 - samples.count)
+                            let row = Int(p.y / (rowHeight + 1))
+                            hover = column >= 0 && column < samples.count && row < order.count ? (column, row) : nil
+                        } else { hover = nil }
+                    }
+                }
+            }
+            .help(hoverText(samples, order))
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Per-core load over the last 60 samples")
+    }
+
+    private func color(_ u: Double) -> Color {
+        let level = Level.of(u * 100, config: config, inverted: false)
+        if level != .normal { return level.color.opacity(0.5 + 0.5 * u) }
+        return WidgetKind.cpu.accent.opacity(0.08 + 0.92 * min(1, u))
+    }
+
+    private func hoverText(_ samples: [(time: Date, usage: [Double])], _ order: [Int]) -> String {
+        guard let hover, samples.indices.contains(hover.column), order.indices.contains(hover.row) else { return "" }
+        let core = order[hover.row]
+        let s = samples[hover.column]
+        guard core < s.usage.count else { return "" }
+        return "Core \(core + 1) at \(s.time.formatted(date: .omitted, time: .standard)): \(Format.percent(s.usage[core]))"
     }
 }
 
@@ -130,7 +241,8 @@ struct MemoryDetail: View {
                     ChartSeries(key: .memApp, label: "App", color: Self.app),
                     ChartSeries(key: .memWired, label: "Wired", color: Self.wired),
                     ChartSeries(key: .memCompressed, label: "Compr.", color: Self.compressed),
-                ], domain: 0...1, stacked: true, format: percentAxis))
+                ], domain: 0...1, stacked: true, thresholds: ChartSpec.thresholds(settings.config(.memory), scale: 0.01), kind: .memory,
+                   format: percentAxis))
             }
             Card {
                 VStack(alignment: .leading, spacing: 7) {
@@ -209,7 +321,7 @@ struct DiskDetail: View {
                 LiveChart(spec: ChartSpec(series: [
                     ChartSeries(key: .diskRead, label: "Read", color: WidgetKind.disk.accent),
                     ChartSeries(key: .diskWrite, label: "Write", color: WidgetKind.disk.secondaryAccent, mirrored: true),
-                ], domain: nil, format: { Format.rate($0, compact: true) }))
+                ], domain: nil, kind: .disk, format: { Format.rate($0, compact: true) }))
             }
             Card {
                 VStack(alignment: .leading, spacing: 8) {
@@ -353,7 +465,8 @@ struct TemperatureDetail: View {
                     ChartSeries(key: .tempCPU, label: "CPU", color: WidgetKind.temperature.accent, area: false),
                     ChartSeries(key: .tempGPU, label: "GPU", color: WidgetKind.gpu.accent, area: false),
                     ChartSeries(key: .tempSSD, label: "SSD", color: WidgetKind.disk.accent, area: false),
-                ], domain: nil, includesZero: false, format: { Format.temperature($0, fahrenheit: f) }))
+                ], domain: nil, includesZero: false, thresholds: ChartSpec.thresholds(config), kind: .temperature,
+                   format: { Format.temperature($0, fahrenheit: f) }))
             }
             Card {
                 VStack(alignment: .leading, spacing: 4) {
@@ -464,7 +577,8 @@ struct GPUDetail: View {
             ])
             Card {
                 LiveChart(spec: ChartSpec(series: [ChartSeries(key: .gpuUsage, label: "Usage", color: WidgetKind.gpu.accent)],
-                                          domain: 0...1, format: percentAxis))
+                                          domain: 0...1, thresholds: ChartSpec.thresholds(settings.config(.gpu), scale: 0.01), kind: .gpu,
+                                          format: percentAxis))
             }
             Card {
                 VStack(alignment: .leading, spacing: 4) {
@@ -500,7 +614,7 @@ struct NetworkDetail: View {
                 LiveChart(spec: ChartSpec(series: [
                     ChartSeries(key: .netDown, label: "Down", color: WidgetKind.network.accent),
                     ChartSeries(key: .netUp, label: "Up", color: WidgetKind.network.secondaryAccent, mirrored: true),
-                ], domain: nil, format: { Format.rate($0, bits: bits, compact: true) }))
+                ], domain: nil, kind: .network, format: { Format.rate($0, bits: bits, compact: true) }))
             }
             Card {
                 VStack(alignment: .leading, spacing: 2) {
@@ -564,7 +678,7 @@ struct BatteryDetail: View {
             Card {
                 // Charge barely moves in a minute; power in (above zero) and out (below) is what changes.
                 LiveChart(spec: ChartSpec(series: [ChartSeries(key: .batteryWatts, label: "Power", color: WidgetKind.battery.accent)],
-                                          domain: nil, format: { String(format: "%.0f W", $0) }))
+                                          domain: nil, kind: .battery, format: { String(format: "%.0f W", $0) }))
             }
             Card {
                 VStack(alignment: .leading, spacing: 4) {
