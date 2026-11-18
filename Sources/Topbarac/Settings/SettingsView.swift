@@ -102,6 +102,22 @@ struct GeneralPane: View {
             } footer: {
                 Text("One timer feeds every widget. Only widgets that are turned on are measured, and details are read only while their popover is open.")
             }
+            Section {
+                LabeledContent("Open the overview") {
+                    HotkeyRecorder(hotkey: $settings.settings.hotkey)
+                }
+            } header: {
+                Text("Keyboard")
+            } footer: {
+                Text("Works in every app. In a popover, ⌘1–⌘7 jump to a widget, ⌘0 to the overview, Esc goes back.")
+            }
+            Section {
+                TextField("Internet latency target", text: $settings.settings.latencyHost, prompt: Text("1.1.1.1"))
+            } header: {
+                Text("Network")
+            } footer: {
+                Text("While the Network popover is open, Topbarac pings your router and this IPv4 address every 2 seconds. Nothing is sent otherwise.")
+            }
             Section("Units") {
                 Picker("Temperature", selection: $settings.settings.temperatureUnit) {
                     Text("Celsius (°C)").tag(TemperatureUnit.celsius)
@@ -155,6 +171,9 @@ struct MenuBarPane: View {
                 Toggle("Combine into one menu bar item", isOn: $settings.settings.mergedMode)
                 if settings.settings.mergedMode {
                     Toggle("Show widget icons", isOn: $settings.settings.mergedShowsIcons)
+                }
+                if !settings.settings.mergedMode {
+                    Toggle("Show the overview item", isOn: $settings.settings.showOverviewItem)
                 }
                 Toggle("Flash the item while an alert is active", isOn: $settings.settings.flashOnCritical)
             } footer: {

@@ -18,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Notifier.shared.setUp()
         Notifier.shared.onOpen = { [weak self] kind in self?.statusItems?.open(kind) }
         observeSystem()
+        HotkeyCenter.shared.start()
         if CommandLine.arguments.contains("--settings") { openSettings() }
+        if !SettingsStore.shared.settings.onboarded || CommandLine.arguments.contains("--welcome") { openWelcome() }
         if let i = CommandLine.arguments.firstIndex(of: "--open"), i + 1 < CommandLine.arguments.count,
            let kind = WidgetKind(rawValue: CommandLine.arguments[i + 1]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.statusItems?.open(kind) }
@@ -55,6 +57,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         settingsWindow?.show()
+    }
+
+    private var welcomeWindow: WindowHost?
+
+    func openWelcome() {
+        welcomeWindow = WindowHost(title: "Welcome to Topbarac", autosave: "topbarac.welcome", size: NSSize(width: 520, height: 560)) {
+            AnyView(WelcomeView {
+                SettingsStore.shared.settings.onboarded = true
+                AppDelegate.shared.finishWelcome()
+            }
+            .environment(MonitorStore.shared).environment(SettingsStore.shared))
+        }
+        welcomeWindow?.show()
+    }
+
+    func finishWelcome() {
+        welcomeWindow?.close()
+        welcomeWindow = nil
+        statusItems?.toggleMain()
     }
 
     func openProcesses(sort: ProcessSort) {
