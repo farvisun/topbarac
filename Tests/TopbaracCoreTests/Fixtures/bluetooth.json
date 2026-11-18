@@ -1,0 +1,70 @@
+{
+  "SPBluetoothDataType" : [
+    {
+      "controller_properties" : {
+        "controller_address" : "00:11:22:33:44:55",
+        "controller_chipset" : "BCM_4388",
+        "controller_discoverable" : "attrib_off",
+        "controller_firmwareVersion" : "24.2.586.4864",
+        "controller_productID" : "0x4A2E",
+        "controller_state" : "attrib_on",
+        "controller_supportedServices" : "0x1390039 < HFP AVRCP A2DP HID LEA AACP GATT SerialPort SCO >",
+        "controller_transport" : "PCIe",
+        "controller_vendorID" : "0x004C (Apple)"
+      },
+      "device_connected" : [
+        {
+          "Sam’s AirPods Pro" : {
+            "device_address" : "A1:B2:C3:D4:E5:F6",
+            "device_batteryLevelCase" : "55%",
+            "device_batteryLevelLeft" : "85%",
+            "device_batteryLevelRight" : "90%",
+            "device_caseVersion" : "1.4.1",
+            "device_firmwareVersion" : "6F21",
+            "device_minorType" : "Headphones",
+            "device_productID" : "0x200E",
+            "device_vendorID" : "0x004C"
+          }
+        },
+        {
+          "Studio Keyboard" : {
+            "device_address" : "10:20:30:40:50:60",
+            "device_batteryLevelMain" : "42%",
+            "device_firmwareVersion" : "2.0.6",
+            "device_minorType" : "Keyboard",
+            "device_productID" : "0x029C",
+            "device_vendorID" : "0x004C"
+          }
+        },
+        {
+          "Desk Speaker" : {
+            "device_address" : "77:88:99:AA:BB:CC",
+            "device_minorType" : "Speaker"
+          }
+        },
+        {
+          "Xbox Wireless Controller" : {
+            "device_address" : "0C:35:26:11:22:33",
+            "device_batteryLevelMain" : "7%",
+            "device_minorType" : "Gamepad"
+          }
+        }
+      ],
+      "device_not_connected" : [
+        {
+          "Office Mouse" : {
+            "device_address" : "DE:AD:BE:EF:00:01",
+            "device_batteryLevelMain" : "100%",
+            "device_minorType" : "Mouse"
+          }
+        },
+        {
+          "Travel Headphones" : {
+            "device_address" : "DE:AD:BE:EF:00:02",
+            "device_minorType" : "Headset"
+          }
+        }
+      ]
+    }
+  ]
+}
