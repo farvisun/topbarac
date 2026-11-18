@@ -1,0 +1,116 @@
+name: Release
+
+# Builds Topbarac.app on a macOS runner and publishes it as a GitHub release when a version tag is pushed.
+#   git tag v1.0.1 && git push origin v1.0.1
+# The tag must match CFBundleShortVersionString in Resources/Info.plist. Release notes come from
+# .github/release-notes/<tag>.md when that file exists. Installed apps update through Sparkle from the
+# appcast.xml attached to the latest release, signed with the SPARKLE_ED_PRIVATE_KEY secret.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  SPARKLE_VERSION: "2.10.1"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.cask.outputs.version }}
+      sha256: ${{ steps.cask.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun --show-sdk-version
+
+      - name: Check version
+        run: |
+          plist=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          if [ "v$plist" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Info.plist version $plist"
+            exit 1
+          fi
+
+      - name: Build
+        run: UNIVERSAL=1 scripts/build-app.sh release
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Topbarac.app Topbarac.zip
+          rm -rf dmg && mkdir dmg && cp -R Topbarac.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname Topbarac -srcfolder dmg -ov -format UDZO Topbarac.dmg
+          shasum -a 256 Topbarac.dmg Topbarac.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Sign the update and write the appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xJ -C "$RUNNER_TEMP" ./bin/sign_update
+          sig="$(echo "$SPARKLE_ED_PRIVATE_KEY" | "$RUNNER_TEMP/bin/sign_update" --ed-key-file - build/Topbarac.zip)"
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Resources/Info.plist)
+          scripts/appcast.sh "${GITHUB_REF_NAME#v}" "$build" build/Topbarac.zip "$sig" > build/appcast.xml
+          cat build/appcast.xml
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=".github/release-notes/$GITHUB_REF_NAME.md"
+          if [ -f "$notes" ]; then cp "$notes" build/notes.md; else echo "Topbarac ${GITHUB_REF_NAME#v}" > build/notes.md; fi
+          {
+            echo
+            echo '### SHA-256'
+            echo '```'
+            cat build/SHA256SUMS.txt
+            echo '```'
+          } >> build/notes.md
+          gh release create "$GITHUB_REF_NAME" build/Topbarac.dmg build/Topbarac.zip build/SHA256SUMS.txt build/appcast.xml \
+            --title "Topbarac ${GITHUB_REF_NAME#v}" --notes-file build/notes.md --verify-tag
+
+      - name: Values for the Homebrew cask
+        id: cask
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 build/Topbarac.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+  cask:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Update the cask in farvisun/homebrew-tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          mkdir -p ~/.ssh && echo "$TAP_DEPLOY_KEY" > ~/.ssh/tap && chmod 600 ~/.ssh/tap
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:farvisun/homebrew-tap.git tap
+          mkdir -p tap/Casks
+          sed -e "s/@VERSION@/$VERSION/" -e "s/@SHA256@/$SHA256/" packaging/topbarac.rb > tap/Casks/topbarac.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/topbarac.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "topbarac $VERSION"
+          git push

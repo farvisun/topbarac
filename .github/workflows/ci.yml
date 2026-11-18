@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main, production]
+    paths-ignore: ["site/**", "**.md"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # The code needs SDK 26 (Liquid Glass, SwiftUI 7).
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift --version
+      - run: swift build
+      # Unit tests only; the live probe suites need real sensors and run with TOPBARAC_LIVE=1 on a Mac.
+      - run: swift test
+      - run: scripts/build-app.sh release
